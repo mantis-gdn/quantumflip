@@ -99,6 +99,7 @@ document.body.appendChild(hud);
 // State
 // --------------------
 let spinning = false;
+let lastPicked = null; // ✅ NEW: persists after current pick clears
 
 // --------------------
 // HUD Update
@@ -165,6 +166,15 @@ function updateHud() {
 
     <div style="margin-top:12px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
       <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
+        LAST PICKED
+      </div>
+      <div style="font-size:16px; margin-top:4px;">
+        ${lastPicked ?? "—"}
+      </div>
+    </div>
+
+    <div style="margin-top:12px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
+      <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
         CURRENT PICK
       </div>
       <div style="font-size:16px; margin-top:4px;">
@@ -216,7 +226,9 @@ window.addEventListener("keydown", (e) => {
       }
     }
 
-    game.pickNumber(Number(key));
+    const pickNum = Number(key);
+    game.pickNumber(pickNum);
+    lastPicked = pickNum; // ✅ NEW: store last picked even after current pick clears
     updateHud();
     return;
   }
