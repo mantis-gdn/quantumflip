@@ -9,15 +9,17 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0f14);
 
 // --------------------
-// Camera (TOP-DOWN POV)
+// Camera (SLIGHT ANGLE, still top-dominant)
 // --------------------
 const camera = new THREE.PerspectiveCamera(
-  60,
+  55,
   window.innerWidth / window.innerHeight,
   0.1,
   100
 );
-camera.position.set(0, 6, 0.001);
+
+// Corner-ish view: shows top + two side faces
+camera.position.set(3.2, 5.2, 3.2);
 camera.lookAt(0, 0, 0);
 
 // --------------------
@@ -82,7 +84,6 @@ function updateHud() {
   const s = game.getState();
   const inPlay = s.roundBet || 0;
 
-  // Helpful hint when player hasn't paid ante yet
   const hint =
     inPlay === 0
       ? "Pick 1–6 to ante + choose • Space = Spin"
@@ -140,7 +141,7 @@ updateHud();
 window.addEventListener("keydown", (e) => {
   const k = e.key;
 
-  // Pick number (THIS is when we pay ante if needed)
+  // Pick number (this is when we pay ante if needed)
   if (["1", "2", "3", "4", "5", "6"].includes(k)) {
     const s = game.getState();
 
@@ -159,7 +160,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
-  // Space = spin → resolve → clear pick only (DO NOT auto-ante next round)
+  // Space = long smooth spin → resolve → clear pick only
   if (k === " ") {
     const s = game.getState();
 
@@ -170,7 +171,7 @@ window.addEventListener("keydown", (e) => {
       return;
     }
 
-    quantumSpin(() => {
+    quantumSpinSmooth(() => {
       const rolled = cube.getTopFaceValue();
       const res = game.resolve(rolled);
       if (!res.ok) {
@@ -183,8 +184,7 @@ window.addEventListener("keydown", (e) => {
       // Clear ONLY the pick after resolve
       game.clearPick();
       updateHud();
-
-      // Next round will start when player picks again
+      // Next round starts when player picks again
     });
 
     return;
@@ -192,44 +192,107 @@ window.addEventListener("keydown", (e) => {
 });
 
 // --------------------
-// Quantum Spin
+// Long Smooth Spin (wild -> settle)
 // --------------------
-function quantumSpin(onDone) {
+function quantumSpinSmooth(onDone) {
   if (spinning) return;
   spinning = true;
 
-  const steps = {
-    x: Math.floor(Math.random() * 8) + 6,
-    y: Math.floor(Math.random() * 8) + 6,
-    z: Math.floor(Math.random() * 8) + 6
-  };
+  // --- Tune these ---
+  const WILD_MS = 1800;   // chaotic spin length
+  const SETTLE_MS = 1300; // easing / landing length
+  const SNAP_EVERY = Math.PI / 2;
 
-  const order = ["x", "y", "z"];
-  let i = 0;
+  // Phase 1 velocities (radians/sec)
+  const sign = () => (Math.random() < 0.5 ? -1 : 1);
+  let vx = (Math.random() * 14 + 18) * sign();
+  let vy = (Math.random() * 14 + 18) * sign();
+  let vz = (Math.random() * 14 + 18) * sign();
 
-  function stepOnce() {
-    const axis = order[i % 3];
-    const dir = Math.random() < 0.5 ? -1 : 1;
+  const wobble = () => (Math.random() - 0.5) * 0.35;
 
-    if (axis === "x" && steps.x-- > 0) cube.rotateXStep(dir);
-    if (axis === "y" && steps.y-- > 0) cube.rotateYStep(dir);
-    if (axis === "z" && steps.z-- > 0) cube.rotateZStep(dir);
+  const t0 = performance.now();
+  let last = t0;
+
+  function wildPhase(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    // "Quantum chaos" velocity drift
+    vx += wobble();
+    vy += wobble();
+    vz += wobble();
+
+    cube.rotation.x += vx * dt;
+    cube.rotation.y += vy * dt;
+    cube.rotation.z += vz * dt;
 
     updateHud();
 
-    if (steps.x <= 0 && steps.y <= 0 && steps.z <= 0) {
-      spinning = false;
-      if (typeof onDone === "function") onDone();
+    if (now - t0 < WILD_MS) {
+      requestAnimationFrame(wildPhase);
       return;
     }
 
-    i++;
-    const remaining = steps.x + steps.y + steps.z;
-    const delay = Math.max(25, Math.min(120, 220 - remaining * 6));
-    setTimeout(stepOnce, delay);
+    settlePhase();
   }
 
-  stepOnce();
+  function easeOutQuint(t) {
+    return 1 - Math.pow(1 - t, 5);
+  }
+
+  function snapAngle(a, step) {
+    return Math.round(a / step) * step;
+  }
+
+  function settlePhase() {
+    const start = {
+      x: cube.rotation.x,
+      y: cube.rotation.y,
+      z: cube.rotation.z
+    };
+
+    // Add extra full turns during settle for drama (still lands on clean face)
+    const extraTurns = () =>
+      (Math.floor(Math.random() * 2) + 1) * Math.PI * 2 * sign();
+
+    const end = {
+      x: snapAngle(start.x, SNAP_EVERY) + extraTurns(),
+      y: snapAngle(start.y, SNAP_EVERY) + extraTurns(),
+      z: snapAngle(start.z, SNAP_EVERY) + extraTurns()
+    };
+
+    const s0 = performance.now();
+
+    function tick(now) {
+      const t = Math.min(1, (now - s0) / SETTLE_MS);
+      const e = easeOutQuint(t);
+
+      cube.rotation.x = start.x + (end.x - start.x) * e;
+      cube.rotation.y = start.y + (end.y - start.y) * e;
+      cube.rotation.z = start.z + (end.z - start.z) * e;
+
+      updateHud();
+
+      if (t < 1) {
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      // Final snap for exact face alignment
+      cube.rotation.x = snapAngle(cube.rotation.x, SNAP_EVERY);
+      cube.rotation.y = snapAngle(cube.rotation.y, SNAP_EVERY);
+      cube.rotation.z = snapAngle(cube.rotation.z, SNAP_EVERY);
+
+      spinning = false;
+      updateHud();
+      if (typeof onDone === "function") onDone();
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(wildPhase);
 }
 
 // --------------------
