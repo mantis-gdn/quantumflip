@@ -84,17 +84,39 @@ function updateHud() {
   const s = game.getState();
   const inPlay = s.roundBet || 0;
 
-  const hint =
-    inPlay === 0
-      ? "Pick 1–6 to ante + choose • Space = Spin"
-      : "Pick 1–6 • Space = Spin";
+  // Game over when player cannot cover the min bet and isn't already in a paid round
+  const gameOver = s.bankroll < s.minBet && inPlay === 0;
+
+  const hint = gameOver
+    ? "GAME OVER • Press R to restart"
+    : (inPlay === 0
+        ? "Pick 1–6 to ante + choose • Space = Spin"
+        : "Pick 1–6 • Space = Spin");
+
+  const banner = gameOver
+    ? `
+      <div style="
+        margin-top:10px;
+        padding:10px 12px;
+        border-radius:12px;
+        background: rgba(220,38,38,0.18);
+        border: 1px solid rgba(220,38,38,0.35);
+        font-size:12px;
+        letter-spacing:0.08em;
+        text-transform:uppercase;
+      ">
+        GAME OVER • Bankroll too low to cover Min Bet
+      </div>
+    `
+    : "";
 
   hud.innerHTML = `
     <div style="font-size:12px; opacity:0.65; letter-spacing:0.08em;">
       QUANTUMFLIP • PRACTICE
     </div>
+    ${banner}
 
-    <div style="font-size:44px; line-height:1; margin-top:6px;">
+    <div style="font-size:44px; line-height:1; margin-top:10px;">
       ${cube.getTopFaceValue()}
     </div>
     <div style="font-size:12px; opacity:0.6; margin-top:2px;">
@@ -139,14 +161,30 @@ updateHud();
 // Controls
 // --------------------
 window.addEventListener("keydown", (e) => {
-  const k = e.key;
+  const key = e.key;
+  const k = key.toLowerCase();
+
+  // R = restart practice run (simple, reliable reset)
+  if (k === "r") {
+    window.location.reload();
+    return;
+  }
+
+  // If game over, ignore everything else (HUD explains restart)
+  const s0 = game.getState();
+  const inPlay0 = s0.roundBet || 0;
+  const gameOver = s0.bankroll < s0.minBet && inPlay0 === 0;
+  if (gameOver) {
+    updateHud();
+    return;
+  }
 
   // Pick number (this is when we pay ante if needed)
-  if (["1", "2", "3", "4", "5", "6"].includes(k)) {
+  if (["1", "2", "3", "4", "5", "6"].includes(key)) {
     const s = game.getState();
 
     // Start round ONLY when player picks (ante paid here)
-    if (s.roundBet === 0) {
+    if ((s.roundBet || 0) === 0) {
       const start = game.startRound();
       if (!start.ok) {
         console.log("Can't start round:", start.reason);
@@ -155,13 +193,13 @@ window.addEventListener("keydown", (e) => {
       }
     }
 
-    game.pickNumber(Number(k));
+    game.pickNumber(Number(key));
     updateHud();
     return;
   }
 
   // Space = long smooth spin → resolve → clear pick only
-  if (k === " ") {
+  if (key === " ") {
     const s = game.getState();
 
     // Require a pick before allowing spin
@@ -199,12 +237,13 @@ function quantumSpinSmooth(onDone) {
   spinning = true;
 
   // --- Tune these ---
-  const WILD_MS = 1800;   // chaotic spin length
-  const SETTLE_MS = 1300; // easing / landing length
+  const WILD_MS = 1800;
+  const SETTLE_MS = 1300;
   const SNAP_EVERY = Math.PI / 2;
 
-  // Phase 1 velocities (radians/sec)
   const sign = () => (Math.random() < 0.5 ? -1 : 1);
+
+  // Velocities (radians/sec)
   let vx = (Math.random() * 14 + 18) * sign();
   let vy = (Math.random() * 14 + 18) * sign();
   let vz = (Math.random() * 14 + 18) * sign();
@@ -218,7 +257,6 @@ function quantumSpinSmooth(onDone) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
-    // "Quantum chaos" velocity drift
     vx += wobble();
     vy += wobble();
     vz += wobble();
@@ -252,7 +290,6 @@ function quantumSpinSmooth(onDone) {
       z: cube.rotation.z
     };
 
-    // Add extra full turns during settle for drama (still lands on clean face)
     const extraTurns = () =>
       (Math.floor(Math.random() * 2) + 1) * Math.PI * 2 * sign();
 
@@ -279,7 +316,6 @@ function quantumSpinSmooth(onDone) {
         return;
       }
 
-      // Final snap for exact face alignment
       cube.rotation.x = snapAngle(cube.rotation.x, SNAP_EVERY);
       cube.rotation.y = snapAngle(cube.rotation.y, SNAP_EVERY);
       cube.rotation.z = snapAngle(cube.rotation.z, SNAP_EVERY);
