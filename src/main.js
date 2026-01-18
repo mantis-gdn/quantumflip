@@ -23,20 +23,43 @@ camera.position.set(3.2, 5.2, 3.2);
 camera.lookAt(0, 0, 0);
 
 // --------------------
-// Renderer
+// Renderer (KEEP IT SIMPLE + STABLE)
 // --------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+// Safe color output so things don't look crushed
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
 document.body.appendChild(renderer.domElement);
 
 // --------------------
-// Lights
+// Lights (UPGRADED, SAFE)
 // --------------------
-scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-const light = new THREE.DirectionalLight(0xffffff, 1.1);
-light.position.set(5, 10, 5);
-scene.add(light);
+
+// Ambient: lower than before so we get contrast (0.85 was flattening)
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+
+// Key light: main form / readability
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.15);
+keyLight.position.set(6, 10, 4);
+scene.add(keyLight);
+
+// Fill light: reduces harsh shadow on opposite side
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.45);
+fillLight.position.set(-5, 4, -3);
+scene.add(fillLight);
+
+// Rim light: edge separation (subtle blue-ish tint)
+const rimLight = new THREE.DirectionalLight(0x8ab4ff, 0.55);
+rimLight.position.set(-7, 7, 7);
+scene.add(rimLight);
+
+// Stage glow: very subtle “table vibe”
+const stageLight = new THREE.PointLight(0x2563eb, 0.35, 12);
+stageLight.position.set(0, -1.4, 0);
+scene.add(stageLight);
 
 // --------------------
 // QuantumCube
@@ -222,7 +245,6 @@ window.addEventListener("keydown", (e) => {
       // Clear ONLY the pick after resolve
       game.clearPick();
       updateHud();
-      // Next round starts when player picks again
     });
 
     return;
