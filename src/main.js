@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { createQuantumCube } from "./quantumCube.js";
+import { createSoloGame } from "./gameSolo.js";
 
 // --------------------
 // Scene
@@ -17,8 +18,7 @@ const camera = new THREE.PerspectiveCamera(
   100
 );
 
-// Camera directly above cube
-camera.position.set(0, 6, 0.001); // tiny Z offset avoids math edge cases
+camera.position.set(0, 6, 0.001);
 camera.lookAt(0, 0, 0);
 
 // --------------------
@@ -46,25 +46,86 @@ cube.position.set(0, 0, 0);
 scene.add(cube);
 
 // --------------------
+// Solo Game Logic (PRACTICE MODE DEFAULTS)
+// --------------------
+const game = createSoloGame({
+  startingBankroll: 200,
+  startingMinBet: 10,
+  minBetIncrease: 5,
+  roundsPerStep: 5
+});
+
+// --------------------
 // HUD
 // --------------------
 const hud = document.createElement("div");
 hud.style.position = "fixed";
 hud.style.left = "12px";
 hud.style.top = "12px";
-hud.style.padding = "10px 14px";
+hud.style.padding = "12px 16px";
 hud.style.borderRadius = "12px";
 hud.style.background = "rgba(0,0,0,0.55)";
 hud.style.border = "1px solid rgba(255,255,255,0.15)";
 hud.style.color = "#e6edf3";
 hud.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
-hud.style.fontWeight = "700";
+hud.style.fontWeight = "800";
 hud.style.userSelect = "none";
+hud.style.minWidth = "260px";
 document.body.appendChild(hud);
 
+// --------------------
+// Playability toggles
+// --------------------
+let spinning = false;
+let autoPlay = false;
+let lastAutoPick = 1;
+
 function updateHud() {
-  hud.textContent = `Top face: ${cube.getTopFaceValue()}`;
+  const s = game.getState();
+
+  const pick = s.lastPick ?? "—";
+  const result = s.lastResult ?? "—";
+  const outcome = s.lastOutcome ?? "—";
+
+  // NOTE: practice mode assumes "inRoom" exists in state; if not, this still works
+  const canAnte = s.bankroll >= s.minBet && s.inRoom !== false;
+
+  const prompt =
+    !canAnte ? "OUT OF FUNDS — start a new run (refresh or reset logic later)" :
+    s.lastPick == null ? "Pick 1–6" :
+    spinning ? "Spinning..." :
+    "Press Space to spin";
+
+  hud.innerHTML = `
+    <div style="font-size:12px; opacity:0.7; letter-spacing:0.08em;">
+      QUANTUMFLIP • PRACTICE
+    </div>
+
+    <div style="font-size:44px; line-height:1; margin-top:6px;">
+      ${cube.getTopFaceValue()}
+    </div>
+    <div style="font-size:12px; opacity:0.7; margin-top:2px;">
+      (top face)
+    </div>
+
+    <div style="margin-top:10px; font-size:14px; opacity:0.95; line-height:1.5;">
+      Bankroll: <b>${s.bankroll}</b><br/>
+      Min Bet: <b>${s.minBet}</b><br/>
+      Jackpot: <b>${s.jackpot}</b><br/>
+      Pick: <b>${pick}</b> • Result: <b>${result}</b> • Outcome: <b>${outcome}</b>
+    </div>
+
+    <div style="margin-top:10px; font-size:13px; opacity:0.8;">
+      ${prompt}
+    </div>
+
+    <div style="margin-top:10px; font-size:12px; opacity:0.6; line-height:1.4;">
+      Enter=New Round • 1–6=Pick • Space=Spin<br/>
+      A=Auto (${autoPlay ? "ON" : "OFF"}) • R=Reset Cube
+    </div>
+  `;
 }
+
 updateHud();
 
 // --------------------
@@ -73,26 +134,91 @@ updateHud();
 window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
 
-  if (k === "x") cube.rotateXStep(+1);
-  if (k === "y") cube.rotateYStep(+1);
-  if (k === "z") cube.rotateZStep(+1);
+  // Enter = new round (pays ante)
+  if (k === "enter") {
+    const res = game.startRound();
+    if (!res.ok) console.log("Round start failed:", res.reason);
+    updateHud();
+    return;
+  }
 
-  if (e.shiftKey && k === "x") cube.rotateXStep(-1);
-  if (e.shiftKey && k === "y") cube.rotateYStep(-1);
-  if (e.shiftKey && k === "z") cube.rotateZStep(-1);
+  // Pick 1..6
+  if (["1", "2", "3", "4", "5", "6"].includes(e.key)) {
+    lastAutoPick = Number(e.key);
+    const res = game.pickNumber(lastAutoPick);
+    if (!res.ok) console.log("Pick failed:", res.reason);
+    updateHud();
+    return;
+  }
 
-  if (k === " ") quantumSpin();
-  if (k === "r") cube.resetRotation();
+  // Space = spin + resolve
+  if (k === " ") {
+    quantumSpin(() => {
+      const rolled = cube.getTopFaceValue();
+      const res = game.resolve(rolled);
+      if (!res.ok) console.log("Resolve failed:", res.reason);
+      updateHud();
+      if (autoPlay) setTimeout(runAutoLoop, 250);
+    });
+    return;
+  }
 
-  updateHud();
+  // A = auto-play toggle
+  if (k === "a") {
+    autoPlay = !autoPlay;
+    updateHud();
+    if (autoPlay) runAutoLoop();
+    return;
+  }
+
+  // R = reset cube rotation (visual only)
+  if (k === "r") {
+    cube.resetRotation();
+    updateHud();
+    return;
+  }
 });
+
+// --------------------
+// Auto Loop (optional but engaging)
+// --------------------
+function runAutoLoop() {
+  if (!autoPlay || spinning) return;
+
+  const s = game.getState();
+
+  // Can't pay ante? Stop.
+  if (s.bankroll < s.minBet) {
+    autoPlay = false;
+    updateHud();
+    return;
+  }
+
+  // If we haven't picked yet, start a round and pick the lastAutoPick
+  if (s.lastPick == null) {
+    const start = game.startRound();
+    if (!start.ok) {
+      autoPlay = false;
+      updateHud();
+      return;
+    }
+    game.pickNumber(lastAutoPick);
+    updateHud();
+  }
+
+  // Spin + resolve, then loop again
+  quantumSpin(() => {
+    const rolled = cube.getTopFaceValue();
+    game.resolve(rolled);
+    updateHud();
+    if (autoPlay) setTimeout(runAutoLoop, 250);
+  });
+}
 
 // --------------------
 // Quantum Spin
 // --------------------
-let spinning = false;
-
-function quantumSpin() {
+function quantumSpin(onDone) {
   if (spinning) return;
   spinning = true;
 
@@ -118,6 +244,7 @@ function quantumSpin() {
     if (steps.x <= 0 && steps.y <= 0 && steps.z <= 0) {
       spinning = false;
       console.log("Resolved result:", cube.getTopFaceValue());
+      if (typeof onDone === "function") onDone();
       return;
     }
 
