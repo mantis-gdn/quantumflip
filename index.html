@@ -11,6 +11,28 @@
         height: 100%;
         overflow: hidden;
         background: #0b0f14;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      }
+
+      /* Casino felt background */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(
+            circle at 50% 40%,
+            rgba(26, 38, 30, 0.95),
+            rgba(8, 12, 14, 1) 72%
+          ),
+          repeating-linear-gradient(
+            45deg,
+            rgba(255,255,255,0.02),
+            rgba(255,255,255,0.02) 2px,
+            transparent 2px,
+            transparent 6px
+          );
+        z-index: -1;
       }
 
       canvas {
