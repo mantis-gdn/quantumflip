@@ -99,7 +99,7 @@ document.body.appendChild(hud);
 // State
 // --------------------
 let spinning = false;
-let lastPicked = null; // persists after current pick clears
+let lastPicked = null;
 
 // HUD throttle during spins (prevents DOM thrash)
 let hudLast = 0;
@@ -111,7 +111,6 @@ function updateHud() {
   const s = game.getState();
   const inPlay = s.roundBet || 0;
 
-  // Game over when player cannot cover the min bet and isn't already in a paid round
   const gameOver = s.bankroll < s.minBet && inPlay === 0;
 
   const hint = gameOver
@@ -196,7 +195,6 @@ function updateHudThrottled(now = performance.now()) {
     updateHud();
     return;
   }
-  // ~20fps during spin
   if (now - hudLast > 50) {
     hudLast = now;
     updateHud();
@@ -216,10 +214,11 @@ window.addEventListener("keydown", (e) => {
   if (key === " " || ["1", "2", "3", "4", "5", "6"].includes(key)) {
     e.preventDefault();
   }
+
   // ignore held key repeat
   if (e.repeat) return;
 
-  // R = restart practice run (clean reset if available, else reload)
+  // R = restart practice run
   if (k === "r") {
     if (typeof game.reset === "function") {
       game.reset();
@@ -232,7 +231,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
-  // If game over, ignore everything else (HUD explains restart)
+  // If game over, ignore everything else
   const s0 = game.getState();
   const inPlay0 = s0.roundBet || 0;
   const gameOver = s0.bankroll < s0.minBet && inPlay0 === 0;
@@ -241,18 +240,17 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
-  // ✅ NEW: while spinning, ignore pick changes entirely
-  // (even if gameSolo also enforces locking, this keeps input clean)
-  if (spinning) {
+  // ✅ Only block number-picks while spinning.
+  // DO NOT block Space here or you'll kill the spin trigger.
+  if (spinning && ["1", "2", "3", "4", "5", "6"].includes(key)) {
     updateHudThrottled();
     return;
   }
 
-  // Pick number (this is when we pay ante if needed)
+  // Pick number (pay ante if needed)
   if (["1", "2", "3", "4", "5", "6"].includes(key)) {
     const s = game.getState();
 
-    // Start round ONLY when player picks (ante paid here)
     if ((s.roundBet || 0) === 0) {
       const start = game.startRound();
       if (!start.ok) {
@@ -275,18 +273,17 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
-  // Space = long smooth spin → resolve → clear pick only
+  // Space = spin
   if (key === " ") {
     const s = game.getState();
 
-    // Require a pick before allowing spin
     if (s.lastPick == null) {
       console.log("Pick a number first (1-6).");
       updateHud();
       return;
     }
 
-    // ✅ NEW: lock pick at spin start (prevents "spin cheating")
+    // lock pick at spin start (prevents mid-spin pick changes)
     if (typeof game.lockPick === "function") {
       game.lockPick();
     }
@@ -301,7 +298,6 @@ window.addEventListener("keydown", (e) => {
       }
 
       // Clear ONLY the pick after resolve (HUD cleanliness)
-      // Note: gameSolo keeps the pick locked anyway; this just clears display
       game.clearPick();
       updateHud();
     });
@@ -311,23 +307,33 @@ window.addEventListener("keydown", (e) => {
 });
 
 // --------------------
-// Long Smooth Spin (wild -> settle)
+// Long Smooth Spin (wild -> settle) with VARIABLE TIMING
 // --------------------
 function quantumSpinSmooth(onDone) {
   if (spinning) return;
   spinning = true;
 
-  // --- Tune these ---
-  const WILD_MS = 1800;
-  const SETTLE_MS = 1300;
   const SNAP_EVERY = Math.PI / 2;
+
+  // ✅ Wild time varies per spin (1000–2000ms)
+  const WILD_MS = randInt(1000, 2000);
+
+  // ✅ Settle time derived from wild time + jitter (feels like a thrown die losing energy)
+  const SETTLE_MS = clampInt(
+    Math.round(WILD_MS * randFloat(0.55, 0.9) + randInt(-120, 160)),
+    700,
+    1800
+  );
 
   const sign = () => (Math.random() < 0.5 ? -1 : 1);
 
+  // Slight energy scaling based on wild time
+  const energy = randFloat(0.9, 1.15) * (WILD_MS / 1600);
+
   // Velocities (radians/sec)
-  let vx = (Math.random() * 14 + 18) * sign();
-  let vy = (Math.random() * 14 + 18) * sign();
-  let vz = (Math.random() * 14 + 18) * sign();
+  let vx = (Math.random() * 14 + 18) * sign() * energy;
+  let vy = (Math.random() * 14 + 18) * sign() * energy;
+  let vz = (Math.random() * 14 + 18) * sign() * energy;
 
   const wobble = () => (Math.random() - 0.5) * 0.35;
 
@@ -376,8 +382,9 @@ function quantumSpinSmooth(onDone) {
       z: cube.rotation.z
     };
 
-    const extraTurns = () =>
-      (Math.floor(Math.random() * 2) + 1) * Math.PI * 2 * sign();
+    // Fewer extra turns when wild was short
+    const turns = WILD_MS < 1300 ? 1 : (Math.floor(Math.random() * 2) + 1);
+    const extraTurns = () => turns * Math.PI * 2 * sign();
 
     const end = {
       x: snapAngle(start.x, SNAP_EVERY) + extraTurns(),
@@ -422,6 +429,17 @@ function quantumSpinSmooth(onDone) {
   }
 
   requestAnimationFrame(wildPhase);
+
+  // ---- helpers ----
+  function randFloat(min, max) {
+    return min + Math.random() * (max - min);
+  }
+  function randInt(min, max) {
+    return Math.floor(min + Math.random() * (max - min + 1));
+  }
+  function clampInt(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
 }
 
 // --------------------
