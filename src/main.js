@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createQuantumCube } from "./quantumCube.js";
-import { createSoloGame } from "./gameSolo.js";
+import { createMultiPlayerGame } from "./gameMulti.js";
 
 // --------------------
 // Scene
@@ -9,7 +9,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0f14);
 
 // --------------------
-// Camera (SLIGHT ANGLE, still top-dominant)
+// Camera
 // --------------------
 const camera = new THREE.PerspectiveCamera(
   55,
@@ -17,46 +17,35 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   100
 );
-
-// Corner-ish view: shows top + two side faces
 camera.position.set(3.2, 5.2, 3.2);
 camera.lookAt(0, 0, 0);
 
 // --------------------
-// Renderer (KEEP IT SIMPLE + STABLE)
+// Renderer
 // --------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-// Safe color output so things don't look crushed
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-
 document.body.appendChild(renderer.domElement);
 
 // --------------------
-// Lights (UPGRADED, SAFE)
+// Lights
 // --------------------
-
-// Ambient: lower than before so we get contrast (0.85 was flattening)
 scene.add(new THREE.AmbientLight(0xffffff, 0.35));
 
-// Key light: main form / readability
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.15);
 keyLight.position.set(6, 10, 4);
 scene.add(keyLight);
 
-// Fill light: reduces harsh shadow on opposite side
 const fillLight = new THREE.DirectionalLight(0xffffff, 0.45);
 fillLight.position.set(-5, 4, -3);
 scene.add(fillLight);
 
-// Rim light: edge separation (subtle blue-ish tint)
 const rimLight = new THREE.DirectionalLight(0x8ab4ff, 0.55);
 rimLight.position.set(-7, 7, 7);
 scene.add(rimLight);
 
-// Stage glow: very subtle “table vibe”
 const stageLight = new THREE.PointLight(0x2563eb, 0.35, 12);
 stageLight.position.set(0, -1.4, 0);
 scene.add(stageLight);
@@ -68,9 +57,10 @@ const cube = createQuantumCube(2);
 scene.add(cube);
 
 // --------------------
-// Solo Game Logic
+// Multiplayer Game
 // --------------------
-const game = createSoloGame({
+const game = createMultiPlayerGame({
+  players: ["P1", "P2"],
   startingBankroll: 200,
   startingMinBet: 10,
   minBetIncrease: 5,
@@ -92,55 +82,59 @@ hud.style.color = "#e6edf3";
 hud.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
 hud.style.fontWeight = "800";
 hud.style.userSelect = "none";
-hud.style.minWidth = "270px";
+hud.style.minWidth = "320px";
 document.body.appendChild(hud);
 
 // --------------------
 // State
 // --------------------
 let spinning = false;
-let lastPicked = null;
-
-// HUD throttle during spins (prevents DOM thrash)
 let hudLast = 0;
 
+// which player is currently “holding the controller”
+let activePickerIndex = 0; // 0=P1, 1=P2
+
 // --------------------
-// HUD Update
+// HUD
 // --------------------
 function updateHud() {
   const s = game.getState();
-  const inPlay = s.roundBet || 0;
 
-  const gameOver = s.bankroll < s.minBet && inPlay === 0;
+  const activeName = s.players?.[activePickerIndex]?.name ?? "—";
 
-  const hint = gameOver
-    ? "GAME OVER • Press R to restart"
-    : (inPlay === 0
-        ? "Pick 1–6 to ante + choose • Space = Spin"
-        : "Pick 1–6 • Space = Spin");
+  const allCommitted = s.roundActive
+    ? s.players.every((p) => p.committed)
+    : false;
 
-  const banner = gameOver
-    ? `
-      <div style="
-        margin-top:10px;
-        padding:10px 12px;
-        border-radius:12px;
-        background: rgba(220,38,38,0.18);
-        border: 1px solid rgba(220,38,38,0.35);
-        font-size:12px;
-        letter-spacing:0.08em;
-        text-transform:uppercase;
-      ">
-        GAME OVER • Bankroll too low to cover Min Bet
+  const hint = spinning
+    ? "Spinning…"
+    : (!s.roundActive
+        ? "Press 1–6 to start round + commit • Q=P1 W=P2"
+        : (allCommitted
+            ? "All committed • spinning…"
+            : "Commit picks • Q=P1 W=P2 • 1–6"));
+
+  const playersHtml = s.players.map((p, i) => {
+    const isActive = i === activePickerIndex;
+    const pick = p.committed ? p.pick : "—";
+    const tag = isActive ? " (active)" : "";
+    return `
+      <div style="margin-top:6px;">
+        <b>${p.name}${tag}</b> • $${p.bankroll} • Pick: <b>${pick}</b>
       </div>
-    `
-    : "";
+    `;
+  }).join("");
+
+  const lastOutcomes = (s.lastOutcomes && s.lastOutcomes.length)
+    ? s.lastOutcomes.map((o) =>
+        `${o.name}: ${o.pick} → ${o.outcome}`
+      ).join("<br/>")
+    : "—";
 
   hud.innerHTML = `
     <div style="font-size:12px; opacity:0.65; letter-spacing:0.08em;">
-      QUANTUMFLIP • PRACTICE
+      QUANTUMFLIP • MULTI
     </div>
-    ${banner}
 
     <div style="font-size:44px; line-height:1; margin-top:10px;">
       ${cube.getTopFaceValue()}
@@ -150,37 +144,27 @@ function updateHud() {
     </div>
 
     <div style="margin-top:10px; font-size:14px; line-height:1.5;">
-      Bankroll: <b>${s.bankroll}</b><br/>
+      Active Picker: <b>${activeName}</b><br/>
       Min Bet: <b>${s.minBet}</b><br/>
-      In Play: <b>${inPlay}</b><br/>
-      Jackpot: <b>${s.jackpot}</b>
+      Jackpot: <b>${s.jackpot}</b><br/>
+      Round: <b>${s.round}</b><br/>
+      Round Active: <b>${s.roundActive ? "YES" : "NO"}</b>
     </div>
 
-    <div style="margin-top:12px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
+    <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
       <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
-        LAST ROUND
+        PLAYERS
+      </div>
+      ${playersHtml}
+    </div>
+
+    <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
+      <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
+        LAST RESULT
       </div>
       <div style="font-size:14px; margin-top:4px;">
-        Last Result: <b>${s.lastResult ?? "—"}</b><br/>
-        Last Outcome: <b>${s.lastOutcome ?? "—"}</b>
-      </div>
-    </div>
-
-    <div style="margin-top:12px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
-      <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
-        LAST PICKED
-      </div>
-      <div style="font-size:16px; margin-top:4px;">
-        ${lastPicked ?? "—"}
-      </div>
-    </div>
-
-    <div style="margin-top:12px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
-      <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
-        CURRENT PICK
-      </div>
-      <div style="font-size:16px; margin-top:4px;">
-        ${s.lastPick ?? "—"}
+        Rolled: <b>${s.lastResult ?? "—"}</b><br/>
+        ${lastOutcomes}
       </div>
     </div>
 
@@ -191,10 +175,7 @@ function updateHud() {
 }
 
 function updateHudThrottled(now = performance.now()) {
-  if (!spinning) {
-    updateHud();
-    return;
-  }
+  if (!spinning) return updateHud();
   if (now - hudLast > 50) {
     hudLast = now;
     updateHud();
@@ -204,110 +185,80 @@ function updateHudThrottled(now = performance.now()) {
 updateHud();
 
 // --------------------
-// Controls
+// Input
 // --------------------
 window.addEventListener("keydown", (e) => {
   const key = e.key;
   const k = key.toLowerCase();
 
-  // prevent scroll / weirdness for gameplay keys
+  // prevent scroll for gameplay keys
   if (key === " " || ["1", "2", "3", "4", "5", "6"].includes(key)) {
     e.preventDefault();
   }
-
-  // ignore held key repeat
   if (e.repeat) return;
 
-  // R = restart practice run
+  // reset
   if (k === "r") {
-    if (typeof game.reset === "function") {
-      game.reset();
-      spinning = false;
-      lastPicked = null;
-      updateHud();
-    } else {
-      window.location.reload();
-    }
-    return;
-  }
-
-  // If game over, ignore everything else
-  const s0 = game.getState();
-  const inPlay0 = s0.roundBet || 0;
-  const gameOver = s0.bankroll < s0.minBet && inPlay0 === 0;
-  if (gameOver) {
+    game.reset();
+    spinning = false;
+    activePickerIndex = 0;
     updateHud();
     return;
   }
 
-  // ✅ Only block number-picks while spinning.
-  // DO NOT block Space here or you'll kill the spin trigger.
-  if (spinning && ["1", "2", "3", "4", "5", "6"].includes(key)) {
-    updateHudThrottled();
-    return;
-  }
+  // select active player (Q/W for P1/P2)
+  if (k === "q") { activePickerIndex = 0; updateHud(); return; }
+  if (k === "w") { activePickerIndex = 1; updateHud(); return; }
 
-  // Pick number (pay ante if needed)
+  // no inputs during spin
+  if (spinning) return;
+
+  // commit pick
   if (["1", "2", "3", "4", "5", "6"].includes(key)) {
     const s = game.getState();
 
-    if ((s.roundBet || 0) === 0) {
+    // first pick of a round auto-starts the round (antes everyone)
+    if (!s.roundActive) {
       const start = game.startRound();
       if (!start.ok) {
-        console.log("Can't start round:", start.reason);
+        console.log("Can't start round:", start.reason, start.player ? `(${start.player})` : "");
         updateHud();
         return;
       }
     }
 
     const pickNum = Number(key);
-    const pickRes = game.pickNumber(pickNum);
-    if (!pickRes.ok) {
-      console.log("Pick rejected:", pickRes.reason);
+    const res = game.pickNumber(activePickerIndex, pickNum);
+    if (!res.ok) {
+      console.log("Pick rejected:", res.reason);
       updateHud();
       return;
     }
 
-    lastPicked = pickNum;
     updateHud();
+
+    // ✅ if that was the last commit, spin immediately
+    if (res.allCommitted) {
+      quantumSpinSmooth(() => {
+        const rolled = cube.getTopFaceValue();
+        const rr = game.resolve(rolled);
+        if (!rr.ok) console.log("Resolve failed:", rr.reason);
+        updateHud();
+      });
+    }
+
     return;
   }
 
-  // Space = spin
+  // Space does nothing in this mode (spin is automatic on last commit)
   if (key === " ") {
-    const s = game.getState();
-
-    if (s.lastPick == null) {
-      console.log("Pick a number first (1-6).");
-      updateHud();
-      return;
-    }
-
-    // lock pick at spin start (prevents mid-spin pick changes)
-    if (typeof game.lockPick === "function") {
-      game.lockPick();
-    }
-
-    quantumSpinSmooth(() => {
-      const rolled = cube.getTopFaceValue();
-      const res = game.resolve(rolled);
-      if (!res.ok) {
-        console.log("Resolve failed:", res.reason);
-        updateHud();
-        return;
-      }
-
-      // Clear ONLY the pick after resolve (HUD cleanliness)
-      game.clearPick();
-      updateHud();
-    });
-
-    return;
+    console.log("Multiplayer: spin happens automatically when all players commit.");
+    updateHud();
   }
 });
 
 // --------------------
-// Long Smooth Spin (wild -> settle) with VARIABLE TIMING
+// Spin with VARIABLE TIMING
 // --------------------
 function quantumSpinSmooth(onDone) {
   if (spinning) return;
@@ -315,10 +266,7 @@ function quantumSpinSmooth(onDone) {
 
   const SNAP_EVERY = Math.PI / 2;
 
-  // ✅ Wild time varies per spin (1000–2000ms)
   const WILD_MS = randInt(1000, 2000);
-
-  // ✅ Settle time derived from wild time + jitter (feels like a thrown die losing energy)
   const SETTLE_MS = clampInt(
     Math.round(WILD_MS * randFloat(0.55, 0.9) + randInt(-120, 160)),
     700,
@@ -326,11 +274,8 @@ function quantumSpinSmooth(onDone) {
   );
 
   const sign = () => (Math.random() < 0.5 ? -1 : 1);
-
-  // Slight energy scaling based on wild time
   const energy = randFloat(0.9, 1.15) * (WILD_MS / 1600);
 
-  // Velocities (radians/sec)
   let vx = (Math.random() * 14 + 18) * sign() * energy;
   let vy = (Math.random() * 14 + 18) * sign() * energy;
   let vz = (Math.random() * 14 + 18) * sign() * energy;
@@ -376,13 +321,8 @@ function quantumSpinSmooth(onDone) {
   }
 
   function settlePhase() {
-    const start = {
-      x: cube.rotation.x,
-      y: cube.rotation.y,
-      z: cube.rotation.z
-    };
+    const start = { x: cube.rotation.x, y: cube.rotation.y, z: cube.rotation.z };
 
-    // Fewer extra turns when wild was short
     const turns = WILD_MS < 1300 ? 1 : (Math.floor(Math.random() * 2) + 1);
     const extraTurns = () => turns * Math.PI * 2 * sign();
 
@@ -404,17 +344,12 @@ function quantumSpinSmooth(onDone) {
 
       updateHudThrottled(now);
 
-      if (t < 1) {
-        requestAnimationFrame(tick);
-        return;
-      }
+      if (t < 1) return requestAnimationFrame(tick);
 
-      // snap to clean cube angles
       cube.rotation.x = snapAngle(cube.rotation.x, SNAP_EVERY);
       cube.rotation.y = snapAngle(cube.rotation.y, SNAP_EVERY);
       cube.rotation.z = snapAngle(cube.rotation.z, SNAP_EVERY);
 
-      // normalize angles to avoid drift / huge values over time
       cube.rotation.order = "XYZ";
       cube.rotation.x = norm2pi(cube.rotation.x);
       cube.rotation.y = norm2pi(cube.rotation.y);
@@ -430,16 +365,9 @@ function quantumSpinSmooth(onDone) {
 
   requestAnimationFrame(wildPhase);
 
-  // ---- helpers ----
-  function randFloat(min, max) {
-    return min + Math.random() * (max - min);
-  }
-  function randInt(min, max) {
-    return Math.floor(min + Math.random() * (max - min + 1));
-  }
-  function clampInt(v, min, max) {
-    return Math.max(min, Math.min(max, v));
-  }
+  function randFloat(min, max) { return min + Math.random() * (max - min); }
+  function randInt(min, max) { return Math.floor(min + Math.random() * (max - min + 1)); }
+  function clampInt(v, min, max) { return Math.max(min, Math.min(max, v)); }
 }
 
 // --------------------
