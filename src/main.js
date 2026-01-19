@@ -219,9 +219,16 @@ window.addEventListener("keydown", (e) => {
   // ignore held key repeat
   if (e.repeat) return;
 
-  // R = restart practice run (simple, reliable reset)
+  // R = restart practice run (clean reset if available, else reload)
   if (k === "r") {
-    window.location.reload();
+    if (typeof game.reset === "function") {
+      game.reset();
+      spinning = false;
+      lastPicked = null;
+      updateHud();
+    } else {
+      window.location.reload();
+    }
     return;
   }
 
@@ -231,6 +238,13 @@ window.addEventListener("keydown", (e) => {
   const gameOver = s0.bankroll < s0.minBet && inPlay0 === 0;
   if (gameOver) {
     updateHud();
+    return;
+  }
+
+  // ✅ NEW: while spinning, ignore pick changes entirely
+  // (even if gameSolo also enforces locking, this keeps input clean)
+  if (spinning) {
+    updateHudThrottled();
     return;
   }
 
@@ -249,7 +263,13 @@ window.addEventListener("keydown", (e) => {
     }
 
     const pickNum = Number(key);
-    game.pickNumber(pickNum);
+    const pickRes = game.pickNumber(pickNum);
+    if (!pickRes.ok) {
+      console.log("Pick rejected:", pickRes.reason);
+      updateHud();
+      return;
+    }
+
     lastPicked = pickNum;
     updateHud();
     return;
@@ -266,6 +286,11 @@ window.addEventListener("keydown", (e) => {
       return;
     }
 
+    // ✅ NEW: lock pick at spin start (prevents "spin cheating")
+    if (typeof game.lockPick === "function") {
+      game.lockPick();
+    }
+
     quantumSpinSmooth(() => {
       const rolled = cube.getTopFaceValue();
       const res = game.resolve(rolled);
@@ -275,7 +300,8 @@ window.addEventListener("keydown", (e) => {
         return;
       }
 
-      // Clear ONLY the pick after resolve
+      // Clear ONLY the pick after resolve (HUD cleanliness)
+      // Note: gameSolo keeps the pick locked anyway; this just clears display
       game.clearPick();
       updateHud();
     });

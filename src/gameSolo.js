@@ -4,7 +4,6 @@ export function createSoloGame({
   minBetIncrease = 5,
   roundsPerStep = 5
 } = {}) {
-
   const state = {
     bankroll: startingBankroll,
     minBet: startingMinBet,
@@ -12,9 +11,12 @@ export function createSoloGame({
 
     round: 0,
     roundBet: 0,
-    lastPick: null,
 
-    // These persist until next resolve overwrites them
+    // Current round pick (lockable)
+    lastPick: null,
+    pickLocked: false,
+
+    // Persist until next resolve overwrites them
     lastResult: null,
     lastOutcome: null
   };
@@ -26,9 +28,9 @@ export function createSoloGame({
     state.roundBet = state.minBet;
     state.bankroll -= state.roundBet;
 
-    // NEW ROUND should only clear the pick.
-    // Do NOT clear lastResult / lastOutcome here.
+    // NEW ROUND clears ONLY the pick + lock state
     state.lastPick = null;
+    state.pickLocked = false;
 
     return { ok: true };
   }
@@ -38,12 +40,21 @@ export function createSoloGame({
   }
 
   function clearPick() {
+    // keep this for HUD cleanup, but do NOT unlock mid-round
     state.lastPick = null;
+  }
+
+  function lockPick() {
+    state.pickLocked = true;
+    return { ok: true };
   }
 
   function pickNumber(n) {
     if (state.roundBet === 0) return { ok: false, reason: "NO_ACTIVE_ROUND" };
     if (!Number.isInteger(n) || n < 1 || n > 6) return { ok: false, reason: "INVALID_PICK" };
+
+    // once locked, no changes allowed (prevents "spin cheating")
+    if (state.pickLocked) return { ok: false, reason: "PICK_LOCKED" };
 
     state.lastPick = n;
     return { ok: true };
@@ -53,6 +64,9 @@ export function createSoloGame({
     if (state.roundBet === 0) return { ok: false, reason: "NO_ACTIVE_ROUND" };
     if (state.lastPick == null) return { ok: false, reason: "NO_PICK" };
     if (!Number.isInteger(rolled) || rolled < 1 || rolled > 6) return { ok: false, reason: "INVALID_ROLL" };
+
+    // resolving finalizes the round
+    state.pickLocked = true;
 
     state.lastResult = rolled;
     const bet = state.roundBet;
@@ -73,6 +87,9 @@ export function createSoloGame({
       state.minBet += minBetIncrease;
     }
 
+    // unlock for next round (since roundBet is now 0, this is safe)
+    state.pickLocked = false;
+
     return {
       ok: true,
       outcome: state.lastOutcome,
@@ -84,6 +101,23 @@ export function createSoloGame({
     };
   }
 
+  function reset() {
+    state.bankroll = startingBankroll;
+    state.minBet = startingMinBet;
+    state.jackpot = 0;
+
+    state.round = 0;
+    state.roundBet = 0;
+
+    state.lastPick = null;
+    state.pickLocked = false;
+
+    state.lastResult = null;
+    state.lastOutcome = null;
+
+    return { ok: true };
+  }
+
   function getState() {
     return { ...state };
   }
@@ -92,8 +126,10 @@ export function createSoloGame({
     startRound,
     beginNextRound,
     clearPick,
+    lockPick,
     pickNumber,
     resolve,
+    reset,
     getState
   };
 }
