@@ -99,7 +99,10 @@ document.body.appendChild(hud);
 // State
 // --------------------
 let spinning = false;
-let lastPicked = null; // ✅ NEW: persists after current pick clears
+let lastPicked = null; // persists after current pick clears
+
+// HUD throttle during spins (prevents DOM thrash)
+let hudLast = 0;
 
 // --------------------
 // HUD Update
@@ -188,6 +191,18 @@ function updateHud() {
   `;
 }
 
+function updateHudThrottled(now = performance.now()) {
+  if (!spinning) {
+    updateHud();
+    return;
+  }
+  // ~20fps during spin
+  if (now - hudLast > 50) {
+    hudLast = now;
+    updateHud();
+  }
+}
+
 updateHud();
 
 // --------------------
@@ -196,6 +211,13 @@ updateHud();
 window.addEventListener("keydown", (e) => {
   const key = e.key;
   const k = key.toLowerCase();
+
+  // prevent scroll / weirdness for gameplay keys
+  if (key === " " || ["1", "2", "3", "4", "5", "6"].includes(key)) {
+    e.preventDefault();
+  }
+  // ignore held key repeat
+  if (e.repeat) return;
 
   // R = restart practice run (simple, reliable reset)
   if (k === "r") {
@@ -228,7 +250,7 @@ window.addEventListener("keydown", (e) => {
 
     const pickNum = Number(key);
     game.pickNumber(pickNum);
-    lastPicked = pickNum; // ✅ NEW: store last picked even after current pick clears
+    lastPicked = pickNum;
     updateHud();
     return;
   }
@@ -253,7 +275,6 @@ window.addEventListener("keydown", (e) => {
         return;
       }
 
-      // Keep Last Result / Last Outcome up
       // Clear ONLY the pick after resolve
       game.clearPick();
       updateHud();
@@ -299,7 +320,7 @@ function quantumSpinSmooth(onDone) {
     cube.rotation.y += vy * dt;
     cube.rotation.z += vz * dt;
 
-    updateHud();
+    updateHudThrottled(now);
 
     if (now - t0 < WILD_MS) {
       requestAnimationFrame(wildPhase);
@@ -315,6 +336,11 @@ function quantumSpinSmooth(onDone) {
 
   function snapAngle(a, step) {
     return Math.round(a / step) * step;
+  }
+
+  function norm2pi(a) {
+    const m = Math.PI * 2;
+    return ((a % m) + m) % m;
   }
 
   function settlePhase() {
@@ -343,16 +369,23 @@ function quantumSpinSmooth(onDone) {
       cube.rotation.y = start.y + (end.y - start.y) * e;
       cube.rotation.z = start.z + (end.z - start.z) * e;
 
-      updateHud();
+      updateHudThrottled(now);
 
       if (t < 1) {
         requestAnimationFrame(tick);
         return;
       }
 
+      // snap to clean cube angles
       cube.rotation.x = snapAngle(cube.rotation.x, SNAP_EVERY);
       cube.rotation.y = snapAngle(cube.rotation.y, SNAP_EVERY);
       cube.rotation.z = snapAngle(cube.rotation.z, SNAP_EVERY);
+
+      // normalize angles to avoid drift / huge values over time
+      cube.rotation.order = "XYZ";
+      cube.rotation.x = norm2pi(cube.rotation.x);
+      cube.rotation.y = norm2pi(cube.rotation.y);
+      cube.rotation.z = norm2pi(cube.rotation.z);
 
       spinning = false;
       updateHud();
