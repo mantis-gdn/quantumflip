@@ -90,21 +90,89 @@ function requestRender() {
 }
 
 // --------------------
-// Winning number history
+// Winning number history + Suggested Pick
 // --------------------
 const HISTORY_MAX = 24; // tweak: how many past rolls to keep
 const winHistory = [];  // newest first
+let suggestedPick = null;
 
 function recordWinNumber(n) {
   if (!Number.isInteger(n)) return;
   winHistory.unshift(n);
   if (winHistory.length > HISTORY_MAX) winHistory.length = HISTORY_MAX;
+
+  // refresh the "edge" whenever a new number lands
+  suggestedPick = getSuggestedPick();
 }
 
 function formatHistory() {
   if (!winHistory.length) return "—";
-  // chunky + readable: "3  •  5  •  1 ..."
-  return winHistory.map((n) => `<span style="display:inline-block; min-width:1.2em; text-align:center;">${n}</span>`).join(`<span style="opacity:0.35;">&nbsp;•&nbsp;</span>`);
+  // smaller + tighter: fits "hot game" without eating the HUD
+  return winHistory
+    .map((n) => `
+      <span style="
+        display:inline-block;
+        min-width:1.0em;
+        text-align:center;
+        font-size:18px;
+        line-height:1;
+        opacity:0.95;
+      ">${n}</span>
+    `)
+    .join(`<span style="opacity:0.28;">&nbsp;•&nbsp;</span>`);
+}
+
+// Recency-weighted hot/cold picker (feels predictive; still fair randomness)
+function getSuggestedPick() {
+  if (winHistory.length < 3) return randInt(1, 6);
+
+  const N = Math.min(winHistory.length, HISTORY_MAX);
+  const weights = [0, 0, 0, 0, 0, 0, 0]; // 1..6
+
+  for (let i = 0; i < N; i++) {
+    const n = winHistory[i];
+    if (!Number.isInteger(n) || n < 1 || n > 6) continue;
+
+    // newer rolls get more weight
+    const w = 1 + (N - i) * 0.08;
+    weights[n] += w;
+  }
+
+  // "Hot" slightly more often than "Cold"
+  const mode = Math.random() < 0.55 ? "HOT" : "COLD";
+
+  let pick = 1;
+  if (mode === "HOT") {
+    let max = -Infinity;
+    for (let n = 1; n <= 6; n++) {
+      if (weights[n] > max) {
+        max = weights[n];
+        pick = n;
+      }
+    }
+  } else {
+    let min = Infinity;
+    for (let n = 1; n <= 6; n++) {
+      if (weights[n] < min) {
+        min = weights[n];
+        pick = n;
+      }
+    }
+  }
+
+  // tiny chaos so it doesn't glue itself forever
+  if (Math.random() < 0.12) pick = randInt(1, 6);
+
+  return pick;
+}
+
+function suggestionTagline() {
+  if (winHistory.length < 3) return "warming up…";
+  return "house says it's next (allegedly)";
+}
+
+function randInt(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
 }
 
 // --------------------
@@ -312,6 +380,7 @@ function updateTableHud() {
     : "—";
 
   const historyHtml = formatHistory();
+  const sug = suggestedPick ?? getSuggestedPick();
 
   const sig = [
     cube.getTopFaceValue(),
@@ -322,7 +391,8 @@ function updateTableHud() {
     s.jackpot,
     s.lastResult ?? "-",
     lastOutcomes,
-    winHistory.join(",") // ✅ signature includes history so HUD refreshes when it changes
+    winHistory.join(","),
+    String(sug)
   ].join("|");
 
   if (sig === lastTableSig) return;
@@ -352,15 +422,41 @@ function updateTableHud() {
       Round Active: <b>${s.roundActive ? "YES" : "NO"}</b>
     </div>
 
+    <div style="
+      margin-top:14px;
+      padding-top:12px;
+      border-top:1px solid rgba(255,255,255,0.14);
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:14px;
+    ">
+      <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+        SUGGESTED PICK
+      </div>
+      <div style="
+        font-size:54px;
+        line-height:1;
+        font-weight:1000;
+        letter-spacing:0.10em;
+        text-shadow: 0 0 18px rgba(255,255,255,0.12);
+      ">
+        ${sug}
+      </div>
+    </div>
+    <div style="font-size:12px; opacity:0.65; margin-top:6px;">
+      ${suggestionTagline()}
+    </div>
+
     <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
       <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
         WINNING NUMBER HISTORY
       </div>
       <div style="
-        font-size:26px;
+        font-size:20px; /* ✅ was 26px */
         margin-top:10px;
-        line-height:1.2;
-        letter-spacing:0.06em;
+        line-height:1.15;
+        letter-spacing:0.04em;
         text-shadow: 0 0 16px rgba(255,255,255,0.10);
         white-space:normal;
         word-break:break-word;
@@ -469,6 +565,7 @@ window.addEventListener("keydown", (e) => {
     lastTableSig = "";
     lastPlayerSig.length = 0;
     winHistory.length = 0; // ✅ clear history on reset
+    suggestedPick = null; // ✅ clear suggestion on reset
     updateAllHuds();
     requestRender();
   }
