@@ -70,7 +70,7 @@ camera.lookAt(0, cube.position.y, 0);
 // Multiplayer Game
 // --------------------
 const game = createMultiPlayerGame({
-  players: ["P1", "P2"],
+  players: ["P1"],
   startingBankroll: 200,
   startingMinBet: 10,
   minBetIncrease: 5,

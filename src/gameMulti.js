@@ -1,6 +1,6 @@
 // gameMulti.js
 export function createMultiPlayerGame({
-  players = ["P1", "P2", "P3", "P4", "P5", "P6"],
+  players = ["P1"],
   startingBankroll = 200,
   startingMinBet = 10,
   minBetIncrease = 5,
