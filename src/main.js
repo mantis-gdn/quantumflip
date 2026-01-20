@@ -90,7 +90,18 @@ function requestRender() {
 }
 
 // --------------------
-// Winning number history + Suggested Pick
+// UI MODE + COLLAPSIBLE SECTIONS (anti-clutter)
+// --------------------
+// auto: compact kicks in when players > 2
+const UI_MODE = "auto"; // "auto" | "full" | "compact"
+let isCompact = false;
+
+// collapsible state
+let showSuggested = true;
+let showHistory = true;
+
+// --------------------
+// Winning number history + Suggested Pick (+ Confidence + Streak)
 // --------------------
 const HISTORY_MAX = 24; // tweak: how many past rolls to keep
 const winHistory = [];  // newest first
@@ -114,12 +125,43 @@ function formatHistory() {
         display:inline-block;
         min-width:1.0em;
         text-align:center;
-        font-size:18px;
+        font-size:${isCompact ? 14 : 16}px;
         line-height:1;
-        opacity:0.95;
+        opacity:0.92;
       ">${n}</span>
     `)
-    .join(`<span style="opacity:0.28;">&nbsp;•&nbsp;</span>`);
+    .join(`<span style="opacity:${isCompact ? 0.22 : 0.28};">&nbsp;•&nbsp;</span>`);
+}
+
+// --------------------
+// Streak / confidence helpers
+// --------------------
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function confidenceLabel(c) {
+  if (c < 0.34) return "LOW";
+  if (c < 0.67) return "MED";
+  return "HIGH";
+}
+
+function getStreakInfo() {
+  if (!winHistory.length) return { num: null, count: 0, label: "warming up…" };
+
+  const first = winHistory[0];
+  let count = 1;
+  for (let i = 1; i < winHistory.length; i++) {
+    if (winHistory[i] !== first) break;
+    count++;
+  }
+
+  let label = "steady…";
+  if (count === 2) label = `WARM • ${first} hit 2x`;
+  if (count === 3) label = `HOT • ${first} hit 3x`;
+  if (count >= 4) label = `DANGEROUS • ${first} hit ${count}x`;
+
+  return { num: first, count, label };
 }
 
 // Recency-weighted hot/cold picker (feels predictive; still fair randomness)
@@ -136,6 +178,12 @@ function getSuggestedPick() {
     // newer rolls get more weight
     const w = 1 + (N - i) * 0.08;
     weights[n] += w;
+  }
+
+  // Slight streak bump (keeps it exciting during repeats)
+  const streak = getStreakInfo();
+  if (streak.num && streak.count >= 2) {
+    weights[streak.num] += streak.count * 0.35;
   }
 
   // "Hot" slightly more often than "Cold"
@@ -164,6 +212,39 @@ function getSuggestedPick() {
   if (Math.random() < 0.12) pick = randInt(1, 6);
 
   return pick;
+}
+
+function computeConfidenceForPick(pick) {
+  if (!pick || winHistory.length < 3) return 0;
+
+  const N = Math.min(winHistory.length, HISTORY_MAX);
+  const weights = [0, 0, 0, 0, 0, 0, 0]; // 1..6
+
+  for (let i = 0; i < N; i++) {
+    const n = winHistory[i];
+    if (!Number.isInteger(n) || n < 1 || n > 6) continue;
+    const w = 1 + (N - i) * 0.08;
+    weights[n] += w;
+  }
+
+  // Include the same streak bump so the meter matches the pick logic vibe
+  const streak = getStreakInfo();
+  if (streak.num && streak.count >= 2) {
+    weights[streak.num] += streak.count * 0.35;
+  }
+
+  const best = weights[pick] || 0;
+
+  // Find runner-up
+  let second = 0;
+  for (let n = 1; n <= 6; n++) {
+    if (n === pick) continue;
+    if (weights[n] > second) second = weights[n];
+  }
+
+  const dominance = best <= 0 ? 0 : (best - second) / Math.max(best, 1);
+  const sampleBoost = Math.min(1, N / 10);
+  return clamp01(dominance * 0.75 + sampleBoost * 0.25);
 }
 
 function suggestionTagline() {
@@ -210,6 +291,42 @@ function makeBtnStyle() {
   `;
 }
 
+function makeSectionHeaderStyle() {
+  return `
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    cursor:pointer;
+    user-select:none;
+    padding:8px 0;
+  `;
+}
+
+function caret(isOpen) {
+  // tiny triangle that doesn't depend on fonts
+  return isOpen ? "▾" : "▸";
+}
+
+function setCompactModeFromPlayers(playerCount) {
+  const prev = isCompact;
+
+  if (UI_MODE === "full") isCompact = false;
+  else if (UI_MODE === "compact") isCompact = true;
+  else isCompact = playerCount > 2; // auto
+
+  // When we flip to compact, default-collapse some stuff
+  if (!prev && isCompact) {
+    showHistory = false;
+    showSuggested = false;
+  }
+  // When we leave compact, re-open (feels nice)
+  if (prev && !isCompact) {
+    showHistory = true;
+    showSuggested = true;
+  }
+}
+
 // --------------------
 // Table HUD (top-left) - large + casino readable
 // --------------------
@@ -235,8 +352,23 @@ tableHud.style.boxShadow =
 
 document.body.appendChild(tableHud);
 
+// Handle clicks for collapsible sections (Suggested/History)
+tableHud.addEventListener("click", (evt) => {
+  const t = evt.target.closest("[data-toggle]");
+  if (!t) return;
+
+  const key = t.dataset.toggle;
+  if (key === "suggested") showSuggested = !showSuggested;
+  if (key === "history") showHistory = !showHistory;
+
+  // force refresh immediately
+  lastTableSig = "";
+  updateTableHud();
+  requestRender();
+});
+
 // --------------------
-// Player Grid (UPPER RIGHT, 2x3)
+// Player Grid (UPPER RIGHT) - adaptive + scroll for 6 players
 // --------------------
 const playerGrid = document.createElement("div");
 playerGrid.style.position = "fixed";
@@ -245,13 +377,14 @@ playerGrid.style.top = "12px";
 playerGrid.style.zIndex = "10";
 playerGrid.style.pointerEvents = "auto";
 playerGrid.style.display = "grid";
-playerGrid.style.gridTemplateColumns = "repeat(2, 1fr)";
 playerGrid.style.gridAutoRows = "auto";
 playerGrid.style.gap = "10px";
 
-playerGrid.style.width = "min(720px, calc(100vw - 760px - 36px))";
+playerGrid.style.width = "min(820px, calc(100vw - 760px - 36px))";
 playerGrid.style.maxHeight = "calc(100vh - 24px)";
-playerGrid.style.overflow = "hidden";
+playerGrid.style.overflow = "auto";              // ✅ scroll instead of "nope"
+playerGrid.style.paddingRight = "6px";           // room for scrollbar
+playerGrid.style.scrollbarGutter = "stable";     // keeps layout from shifting
 
 document.body.appendChild(playerGrid);
 
@@ -263,6 +396,18 @@ let lastTableSig = "";
 const lastPlayerSig = [];
 let spinning = false;
 let hudLast = 0;
+
+function setPlayerGridColumns(playerCount) {
+  // If you have room, 3 columns makes 6 players feel clean
+  // Otherwise, it falls back to 2 columns.
+  const wideEnoughFor3 = window.innerWidth >= 1600;
+  const cols =
+    playerCount >= 5
+      ? (wideEnoughFor3 ? 3 : 2)
+      : (playerCount <= 2 ? 1 : 2);
+
+  playerGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+}
 
 function createPlayerHudCard(i) {
   const el = document.createElement("div");
@@ -299,8 +444,7 @@ function rebuildPlayerHudsIfNeeded(playerCount) {
     el.remove();
   }
 
-  const rows = Math.ceil(playerCount / 2);
-  playerGrid.style.gridTemplateRows = `repeat(${Math.max(rows, 1)}, auto)`;
+  setPlayerGridColumns(playerCount);
 }
 
 // --------------------
@@ -362,6 +506,9 @@ function colorOutcome(outcome) {
 function updateTableHud() {
   const s = game.getState();
 
+  // ✅ determine compact mode automatically based on player count
+  setCompactModeFromPlayers(s.players.length);
+
   const allCommitted = s.roundActive ? s.players.every((p) => p.committed) : false;
 
   // ✅ No keyboard hint anymore (buttons only)
@@ -380,9 +527,23 @@ function updateTableHud() {
     : "—";
 
   const historyHtml = formatHistory();
-  const sug = suggestedPick ?? getSuggestedPick();
+
+  const sug = (suggestedPick ?? getSuggestedPick());
+  const streak = getStreakInfo();
+  const conf = computeConfidenceForPick(sug);
+  const confPct = Math.round(conf * 100);
+  const confText = (winHistory.length < 3) ? "—" : confidenceLabel(conf);
+
+  // Compact sizing tweaks
+  const TOP_FACE_SIZE = isCompact ? 72 : 84;
+  const SUG_NUM_SIZE = isCompact ? 44 : 54;
+  const SECTION_TITLE_SIZE = isCompact ? 13 : 14;
 
   const sig = [
+    isCompact ? 1 : 0,
+    showSuggested ? 1 : 0,
+    showHistory ? 1 : 0,
+    s.players.length,
     cube.getTopFaceValue(),
     spinning ? 1 : 0,
     s.roundActive ? 1 : 0,
@@ -392,19 +553,131 @@ function updateTableHud() {
     s.lastResult ?? "-",
     lastOutcomes,
     winHistory.join(","),
-    String(sug)
+    String(sug),
+    String(confPct),
+    streak.label
   ].join("|");
 
   if (sig === lastTableSig) return;
   lastTableSig = sig;
 
+  const suggestedSection = `
+    <div style="
+      margin-top:${isCompact ? 12 : 16}px;
+      padding-top:12px;
+      border-top:1px solid rgba(255,255,255,0.14);
+    ">
+      <div data-toggle="suggested" style="${makeSectionHeaderStyle()}">
+        <div style="display:flex; gap:10px; align-items:baseline;">
+          <div style="font-size:${SECTION_TITLE_SIZE}px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+            ${caret(showSuggested)} SUGGESTED PICK
+          </div>
+          <div style="font-size:12px; opacity:0.55;">
+            ${isCompact ? "(tap to expand)" : ""}
+          </div>
+        </div>
+        <div style="font-size:12px; opacity:0.65;">
+          Confidence: <b>${confText}</b> (${confPct}%)
+        </div>
+      </div>
+
+      ${
+        showSuggested
+          ? `
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px;">
+              <div style="font-size:12px; opacity:0.65;">
+                ${streak.label}
+              </div>
+
+              <div style="
+                font-size:${SUG_NUM_SIZE}px;
+                line-height:1;
+                font-weight:1000;
+                letter-spacing:0.10em;
+                text-shadow: 0 0 18px rgba(255,255,255,0.12);
+              ">
+                ${sug}
+              </div>
+            </div>
+
+            <div style="
+              margin-top:10px;
+              height:10px;
+              border-radius:999px;
+              background: rgba(255,255,255,0.08);
+              border: 1px solid rgba(255,255,255,0.14);
+              overflow:hidden;
+            ">
+              <div style="
+                height:100%;
+                width:${confPct}%;
+                background: rgba(255,255,255,0.45);
+              "></div>
+            </div>
+
+            <div style="font-size:12px; opacity:0.65; margin-top:8px;">
+              ${suggestionTagline()}
+            </div>
+          `
+          : `
+            <div style="font-size:12px; opacity:0.65; margin-top:6px;">
+              ${suggestionTagline()}
+            </div>
+          `
+      }
+    </div>
+  `;
+
+  const historySection = `
+    <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
+      <div data-toggle="history" style="${makeSectionHeaderStyle()}">
+        <div style="font-size:${SECTION_TITLE_SIZE}px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+          ${caret(showHistory)} WINNING NUMBER HISTORY
+        </div>
+        <div style="font-size:12px; opacity:0.55;">
+          ${isCompact ? "collapsed by default" : `last ${HISTORY_MAX}`}
+        </div>
+      </div>
+
+      ${
+        showHistory
+          ? `
+            <div style="
+              font-size:${isCompact ? 16 : 18}px;
+              margin-top:8px;
+              line-height:1.12;
+              letter-spacing:0.03em;
+              text-shadow: 0 0 16px rgba(255,255,255,0.10);
+              white-space:normal;
+              word-break:break-word;
+            ">
+              ${historyHtml}
+            </div>
+            <div style="font-size:12px; opacity:0.65; margin-top:8px;">
+              Latest on the left • last ${HISTORY_MAX}
+            </div>
+          `
+          : `
+            <div style="font-size:12px; opacity:0.65; margin-top:6px;">
+              Tap to expand
+            </div>
+          `
+      }
+    </div>
+  `;
+
   tableHud.innerHTML = `
-    <div style="font-size:14px; opacity:0.75; letter-spacing:0.14em; text-transform:uppercase;">
-      QUANTUMFLIP • MULTI (TABLE)
+    <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px;">
+      <div style="font-size:14px; opacity:0.75; letter-spacing:0.14em; text-transform:uppercase;">
+        QUANTUMFLIP • MULTI (TABLE)
+      </div>
+      <div style="font-size:12px; opacity:0.60;">
+        Mode: <b>${UI_MODE === "auto" ? (isCompact ? "COMPACT" : "FULL") : UI_MODE.toUpperCase()}</b>
+      </div>
     </div>
 
     <div style="
-      font-size:84px;
+      font-size:${TOP_FACE_SIZE}px;
       line-height:1;
       margin-top:10px;
       text-shadow: 0 0 18px rgba(255,255,255,0.18);
@@ -415,64 +688,21 @@ function updateTableHud() {
       (top face)
     </div>
 
-    <div style="margin-top:14px; font-size:22px; line-height:1.45;">
+    <div style="margin-top:14px; font-size:${isCompact ? 20 : 22}px; line-height:1.45;">
       Min Bet: <b>${s.minBet}</b><br/>
       Jackpot: <b>${s.jackpot}</b><br/>
       Round: <b>${s.round}</b><br/>
       Round Active: <b>${s.roundActive ? "YES" : "NO"}</b>
     </div>
 
-    <div style="
-      margin-top:14px;
-      padding-top:12px;
-      border-top:1px solid rgba(255,255,255,0.14);
-      display:flex;
-      align-items:flex-end;
-      justify-content:space-between;
-      gap:14px;
-    ">
-      <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
-        SUGGESTED PICK
-      </div>
-      <div style="
-        font-size:54px;
-        line-height:1;
-        font-weight:1000;
-        letter-spacing:0.10em;
-        text-shadow: 0 0 18px rgba(255,255,255,0.12);
-      ">
-        ${sug}
-      </div>
-    </div>
-    <div style="font-size:12px; opacity:0.65; margin-top:6px;">
-      ${suggestionTagline()}
-    </div>
-
-    <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
-      <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
-        WINNING NUMBER HISTORY
-      </div>
-      <div style="
-        font-size:20px; /* ✅ was 26px */
-        margin-top:10px;
-        line-height:1.15;
-        letter-spacing:0.04em;
-        text-shadow: 0 0 16px rgba(255,255,255,0.10);
-        white-space:normal;
-        word-break:break-word;
-      ">
-        ${historyHtml}
-      </div>
-      <div style="font-size:12px; opacity:0.65; margin-top:8px;">
-        Latest on the left • last ${HISTORY_MAX}
-      </div>
-    </div>
+    ${suggestedSection}
+    ${historySection}
 
     <div style="margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
-      <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+      <div style="font-size:${SECTION_TITLE_SIZE}px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
         LAST RESULT
       </div>
-      <div style="font-size:20px; margin-top:8px;">
+      <div style="font-size:${isCompact ? 18 : 20}px; margin-top:8px;">
         Rolled: <b>${s.lastResult ?? "—"}</b><br/>
         ${lastOutcomes}
       </div>
@@ -566,6 +796,11 @@ window.addEventListener("keydown", (e) => {
     lastPlayerSig.length = 0;
     winHistory.length = 0; // ✅ clear history on reset
     suggestedPick = null; // ✅ clear suggestion on reset
+
+    // reset UI state (feels consistent after reset)
+    showSuggested = true;
+    showHistory = true;
+
     updateAllHuds();
     requestRender();
   }
@@ -705,6 +940,10 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(1);
+
+  // keep the player grid responsive to screen width
+  setPlayerGridColumns(game.getState().players.length);
+
   requestRender();
   updateAllHuds();
 });
