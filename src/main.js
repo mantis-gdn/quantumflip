@@ -90,6 +90,24 @@ function requestRender() {
 }
 
 // --------------------
+// Winning number history
+// --------------------
+const HISTORY_MAX = 24; // tweak: how many past rolls to keep
+const winHistory = [];  // newest first
+
+function recordWinNumber(n) {
+  if (!Number.isInteger(n)) return;
+  winHistory.unshift(n);
+  if (winHistory.length > HISTORY_MAX) winHistory.length = HISTORY_MAX;
+}
+
+function formatHistory() {
+  if (!winHistory.length) return "—";
+  // chunky + readable: "3  •  5  •  1 ..."
+  return winHistory.map((n) => `<span style="display:inline-block; min-width:1.2em; text-align:center;">${n}</span>`).join(`<span style="opacity:0.35;">&nbsp;•&nbsp;</span>`);
+}
+
+// --------------------
 // HUD styling helpers
 // --------------------
 function baseHudStyle(el) {
@@ -252,8 +270,11 @@ function commitPickForPlayer(playerIndex, pickNum) {
   if (res.allCommitted) {
     quantumSpinSmooth(() => {
       const rolled = cube.getTopFaceValue();
+      recordWinNumber(rolled); // ✅ add to history right when a roll is finalized
+
       const rr = game.resolve(rolled);
       if (!rr.ok) console.log("Resolve failed:", rr.reason);
+
       updateAllHuds();
       requestRender();
     });
@@ -290,6 +311,8 @@ function updateTableHud() {
         .join("<br/>")
     : "—";
 
+  const historyHtml = formatHistory();
+
   const sig = [
     cube.getTopFaceValue(),
     spinning ? 1 : 0,
@@ -298,7 +321,8 @@ function updateTableHud() {
     s.minBet,
     s.jackpot,
     s.lastResult ?? "-",
-    lastOutcomes
+    lastOutcomes,
+    winHistory.join(",") // ✅ signature includes history so HUD refreshes when it changes
   ].join("|");
 
   if (sig === lastTableSig) return;
@@ -326,6 +350,26 @@ function updateTableHud() {
       Jackpot: <b>${s.jackpot}</b><br/>
       Round: <b>${s.round}</b><br/>
       Round Active: <b>${s.roundActive ? "YES" : "NO"}</b>
+    </div>
+
+    <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
+      <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+        WINNING NUMBER HISTORY
+      </div>
+      <div style="
+        font-size:26px;
+        margin-top:10px;
+        line-height:1.2;
+        letter-spacing:0.06em;
+        text-shadow: 0 0 16px rgba(255,255,255,0.10);
+        white-space:normal;
+        word-break:break-word;
+      ">
+        ${historyHtml}
+      </div>
+      <div style="font-size:12px; opacity:0.65; margin-top:8px;">
+        Latest on the left • last ${HISTORY_MAX}
+      </div>
     </div>
 
     <div style="margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
@@ -424,6 +468,7 @@ window.addEventListener("keydown", (e) => {
     spinning = false;
     lastTableSig = "";
     lastPlayerSig.length = 0;
+    winHistory.length = 0; // ✅ clear history on reset
     updateAllHuds();
     requestRender();
   }
