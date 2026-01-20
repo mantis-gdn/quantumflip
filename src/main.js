@@ -318,6 +318,12 @@ let payoutLastSig = "";
 let payoutShowing = false;
 
 // --------------------
+// TUNABLE UI TIMING
+// --------------------
+const PAYOUT_HIDE_MS = 3600; // overlay hang time
+const PAYOUT_FADE_MS = 220; // slide-out duration
+
+// --------------------
 // ✅ PATCH: HUD FX CSS (ONE-TIME INJECTION)
 // --------------------
 function injectHudFxCss() {
@@ -334,6 +340,10 @@ function injectHudFxCss() {
       0%, 100% { box-shadow: 0 0 0 2px rgba(239,68,68,0.18), 0 0 22px rgba(239,68,68,0.40), 0 0 50px rgba(239,68,68,0.18); }
       50%      { box-shadow: 0 0 0 2px rgba(239,68,68,0.30), 0 0 30px rgba(239,68,68,0.62), 0 0 65px rgba(239,68,68,0.26); }
     }
+    @keyframes qfPickPulse {
+      0%, 100% { transform: scale(1); filter: brightness(1); }
+      50%      { transform: scale(1.035); filter: brightness(1.12); }
+    }
     @keyframes qfSlideDown {
       from { transform: translateX(-50%) translateY(-14px); opacity: 0; }
       to   { transform: translateX(-50%) translateY(0);     opacity: 1; }
@@ -349,7 +359,7 @@ function injectHudFxCss() {
 // ✅ call once
 injectHudFxCss();
 
-// ✅ PATCH: payout overlay that actually pops (NEON + STRONG COLOR)
+// ✅ PATCH: payout overlay (slide in/out + tunable timer)
 function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
   const isWin = tone === "win";
   const isMiss = tone === "miss";
@@ -360,8 +370,10 @@ function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
   const glow = `hsla(${hue}, 95%, 62%, 0.45)`;
   const glow2 = `hsla(${hue}, 95%, 62%, 0.22)`;
 
+  payoutShowing = true;
+
   payoutOverlay.innerHTML = `
-    <div style="
+    <div id="qf-payout-card" style="
       position:relative;
       border-radius:20px;
       background: rgba(0,0,0,0.78);
@@ -378,8 +390,9 @@ function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       overflow:hidden;
+      animation: qfSlideDown 180ms ease-out;
+      transform-origin: top center;
     ">
-      <!-- TOP LINE -->
       <div style="
         position:absolute;
         left:-10%;
@@ -391,7 +404,6 @@ function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
         pointer-events:none;
       "></div>
 
-      <!-- SHIMMER STRIPE (NOW UNDER TEXT) -->
       <div style="
         position:absolute;
         inset:-50% -15%;
@@ -403,7 +415,6 @@ function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
         opacity:0.9;
       "></div>
 
-      <!-- CONTENT WRAP -->
       <div style="min-width:0; position:relative; z-index:1;">
         <div style="
           font-size:12px;
@@ -445,7 +456,6 @@ function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
           0 0 34px ${glow2};
       ">${right}</div>
 
-      <!-- BOTTOM LINE -->
       <div style="
         position:absolute;
         left:-10%;
@@ -460,14 +470,20 @@ function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
   `;
 
   if (payoutTimer) clearTimeout(payoutTimer);
+
   payoutTimer = setTimeout(() => {
-    payoutOverlay.innerHTML = "";
-    requestRender();
-  }, 5000);
+    const card = document.getElementById("qf-payout-card");
+    if (card) card.style.animation = `qfSlideUp ${PAYOUT_FADE_MS}ms ease-in`;
+
+    setTimeout(() => {
+      payoutOverlay.innerHTML = "";
+      payoutShowing = false;
+      requestRender();
+    }, PAYOUT_FADE_MS);
+  }, PAYOUT_HIDE_MS);
 
   requestRender();
 }
-
 
 // --------------------
 // Player Grid (UPPER RIGHT, 2 columns)
@@ -538,6 +554,20 @@ function setPlayerBorderFromOutcome(el, outcome) {
       "linear-gradient(180deg, rgba(239,68,68,0.14), rgba(0,0,0,0.68))";
     el.style.animation = "qfPulseMiss 900ms ease-in-out infinite";
     return;
+  }
+}
+
+function applyCommittedLockStyle(el, committed) {
+  if (!el) return;
+
+  if (committed) {
+    el.style.filter = "saturate(0.92)";
+    el.style.background =
+      "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.74))";
+    el.style.boxShadow =
+      "0 12px 34px rgba(0,0,0,0.62), inset 0 0 0 1px rgba(255,255,255,0.05), inset 0 0 18px rgba(0,0,0,0.55)";
+  } else {
+    el.style.filter = "";
   }
 }
 
@@ -677,20 +707,35 @@ function updateTableHud() {
   const allCommitted = s.roundActive ? s.players.every((p) => p.committed) : false;
 
   const hint = spinning
-    ? "Spinning…"
+    ? "SPINNING…"
     : (!s.roundActive
-        ? "Tap a player's buttons to commit • Esc=Reset"
+        ? "PLACE YOUR BETS • Esc=Reset"
         : (allCommitted
-            ? "All committed • spinning…"
-            : "Tap buttons to commit picks"));
+            ? "NO MORE BETS"
+            : "AWAITING ALL PLAYERS"));
 
   const historyHtml = formatHistory();
 
-  const sug = (suggestedPick ?? getSuggestedPick());
+  const sug = suggestedPick ?? getSuggestedPick();
   const streak = getStreakInfo();
   const conf = computeConfidenceForPick(sug);
   const confPct = Math.round(conf * 100);
-  const confText = (winHistory.length < 3) ? "—" : confidenceLabel(conf);
+  const confText = winHistory.length < 3 ? "—" : confidenceLabel(conf);
+
+  const confTier = winHistory.length < 3 ? "NONE" : confidenceLabel(conf);
+  const pickHue = confTier === "HIGH" ? 140 : confTier === "MED" ? 55 : 210;
+
+  const pickGlow =
+    confTier === "HIGH"
+      ? `0 0 18px hsla(${pickHue},95%,62%,0.38), 0 0 42px hsla(${pickHue},95%,62%,0.18)`
+      : confTier === "MED"
+      ? `0 0 14px hsla(${pickHue},95%,62%,0.26), 0 0 28px hsla(${pickHue},95%,62%,0.12)`
+      : `0 0 10px rgba(255,255,255,0.10)`;
+
+  const pickAnim =
+    (confTier === "HIGH" || confTier === "MED") && !spinning
+      ? "qfPickPulse 900ms ease-in-out infinite"
+      : "none";
 
   const sig = [
     cube.getTopFaceValue(),
@@ -757,7 +802,8 @@ function updateTableHud() {
           line-height:1;
           font-weight:1000;
           letter-spacing:0.10em;
-          text-shadow: 0 0 18px rgba(255,255,255,0.12);
+          text-shadow: ${pickGlow};
+          animation: ${pickAnim};
         ">
           ${sug}
         </div>
@@ -834,6 +880,9 @@ function updatePlayerHud(i) {
   const el = playerHuds[i];
   setPlayerBorderFromOutcome(el, playerOutcome[i]);
 
+  // committed lock look (only before outcome paints WIN/MISS)
+  if (!playerOutcome[i]) applyCommittedLockStyle(el, !!p.committed);
+
   const btnStyle = makeBtnStyle();
   const btnOpacity = p.committed ? "0.55" : "1";
 
@@ -903,6 +952,7 @@ window.addEventListener("keydown", (e) => {
     if (payoutTimer) clearTimeout(payoutTimer);
     payoutTimer = null;
     payoutOverlay.innerHTML = "";
+    payoutShowing = false;
 
     for (let i = 0; i < playerOutcome.length; i++) playerOutcome[i] = null;
 
@@ -1019,9 +1069,15 @@ function quantumSpinSmooth(onDone) {
 
   requestAnimationFrame(wildPhase);
 
-  function randFloat(min, max) { return min + Math.random() * (max - min + 1); }
-  function randInt(min, max) { return Math.floor(min + Math.random() * (max - min + 1)); }
-  function clampInt(v, min, max) { return Math.max(min, Math.min(max, v)); }
+  function randFloat(min, max) {
+    return min + Math.random() * (max - min);
+  }
+  function randInt(min, max) {
+    return Math.floor(min + Math.random() * (max - min + 1));
+  }
+  function clampInt(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
 }
 
 // --------------------
@@ -1029,8 +1085,7 @@ function quantumSpinSmooth(onDone) {
 // --------------------
 function animate(now = 0) {
   if (needsRender && now - lastFrameTime >= FRAME_MS) {
-
-    // NEW: animated cube glow
+    // animated cube glow
     cube.updateFX(now * 0.001, spinning ? 1.6 : 0.8);
 
     renderer.render(scene, camera);
