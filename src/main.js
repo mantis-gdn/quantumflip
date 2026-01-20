@@ -70,7 +70,7 @@ camera.lookAt(0, cube.position.y, 0);
 // Multiplayer Game
 // --------------------
 const game = createMultiPlayerGame({
-  players: ["P1"],
+  players: ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P12"],
   startingBankroll: 200,
   startingMinBet: 10,
   minBetIncrease: 5,
@@ -90,47 +90,35 @@ function requestRender() {
 }
 
 // --------------------
-// UI MODE + COLLAPSIBLE SECTIONS (anti-clutter)
-// --------------------
-// auto: compact kicks in when players > 2
-const UI_MODE = "auto"; // "auto" | "full" | "compact"
-let isCompact = false;
-
-// collapsible state
-let showSuggested = true;
-let showHistory = true;
-
-// --------------------
 // Winning number history + Suggested Pick (+ Confidence + Streak)
 // --------------------
-const HISTORY_MAX = 24; // tweak: how many past rolls to keep
-const winHistory = [];  // newest first
+const HISTORY_MAX = 24;
+const winHistory = []; // newest first
 let suggestedPick = null;
 
 function recordWinNumber(n) {
   if (!Number.isInteger(n)) return;
   winHistory.unshift(n);
   if (winHistory.length > HISTORY_MAX) winHistory.length = HISTORY_MAX;
-
-  // refresh the "edge" whenever a new number lands
   suggestedPick = getSuggestedPick();
 }
 
 function formatHistory() {
   if (!winHistory.length) return "—";
-  // smaller + tighter: fits "hot game" without eating the HUD
   return winHistory
-    .map((n) => `
+    .map(
+      (n) => `
       <span style="
         display:inline-block;
         min-width:1.0em;
         text-align:center;
-        font-size:${isCompact ? 14 : 16}px;
+        font-size:18px;
         line-height:1;
-        opacity:0.92;
+        opacity:0.95;
       ">${n}</span>
-    `)
-    .join(`<span style="opacity:${isCompact ? 0.22 : 0.28};">&nbsp;•&nbsp;</span>`);
+    `
+    )
+    .join(`<span style="opacity:0.28;">&nbsp;•&nbsp;</span>`);
 }
 
 // --------------------
@@ -164,7 +152,6 @@ function getStreakInfo() {
   return { num: first, count, label };
 }
 
-// Recency-weighted hot/cold picker (feels predictive; still fair randomness)
 function getSuggestedPick() {
   if (winHistory.length < 3) return randInt(1, 6);
 
@@ -174,19 +161,15 @@ function getSuggestedPick() {
   for (let i = 0; i < N; i++) {
     const n = winHistory[i];
     if (!Number.isInteger(n) || n < 1 || n > 6) continue;
-
-    // newer rolls get more weight
     const w = 1 + (N - i) * 0.08;
     weights[n] += w;
   }
 
-  // Slight streak bump (keeps it exciting during repeats)
   const streak = getStreakInfo();
   if (streak.num && streak.count >= 2) {
     weights[streak.num] += streak.count * 0.35;
   }
 
-  // "Hot" slightly more often than "Cold"
   const mode = Math.random() < 0.55 ? "HOT" : "COLD";
 
   let pick = 1;
@@ -208,9 +191,7 @@ function getSuggestedPick() {
     }
   }
 
-  // tiny chaos so it doesn't glue itself forever
   if (Math.random() < 0.12) pick = randInt(1, 6);
-
   return pick;
 }
 
@@ -218,7 +199,7 @@ function computeConfidenceForPick(pick) {
   if (!pick || winHistory.length < 3) return 0;
 
   const N = Math.min(winHistory.length, HISTORY_MAX);
-  const weights = [0, 0, 0, 0, 0, 0, 0]; // 1..6
+  const weights = [0, 0, 0, 0, 0, 0, 0];
 
   for (let i = 0; i < N; i++) {
     const n = winHistory[i];
@@ -227,7 +208,6 @@ function computeConfidenceForPick(pick) {
     weights[n] += w;
   }
 
-  // Include the same streak bump so the meter matches the pick logic vibe
   const streak = getStreakInfo();
   if (streak.num && streak.count >= 2) {
     weights[streak.num] += streak.count * 0.35;
@@ -235,7 +215,6 @@ function computeConfidenceForPick(pick) {
 
   const best = weights[pick] || 0;
 
-  // Find runner-up
   let second = 0;
   for (let n = 1; n <= 6; n++) {
     if (n === pick) continue;
@@ -291,44 +270,8 @@ function makeBtnStyle() {
   `;
 }
 
-function makeSectionHeaderStyle() {
-  return `
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:10px;
-    cursor:pointer;
-    user-select:none;
-    padding:8px 0;
-  `;
-}
-
-function caret(isOpen) {
-  // tiny triangle that doesn't depend on fonts
-  return isOpen ? "▾" : "▸";
-}
-
-function setCompactModeFromPlayers(playerCount) {
-  const prev = isCompact;
-
-  if (UI_MODE === "full") isCompact = false;
-  else if (UI_MODE === "compact") isCompact = true;
-  else isCompact = playerCount > 2; // auto
-
-  // When we flip to compact, default-collapse some stuff
-  if (!prev && isCompact) {
-    showHistory = false;
-    showSuggested = false;
-  }
-  // When we leave compact, re-open (feels nice)
-  if (prev && !isCompact) {
-    showHistory = true;
-    showSuggested = true;
-  }
-}
-
 // --------------------
-// Table HUD (top-left) - large + casino readable
+// Table HUD (top-left)
 // --------------------
 const tableHud = document.createElement("div");
 baseHudStyle(tableHud);
@@ -350,25 +293,101 @@ tableHud.style.border = "1px solid rgba(255,255,255,0.22)";
 tableHud.style.boxShadow =
   "0 14px 50px rgba(0,0,0,0.55), 0 0 0 2px rgba(255,255,255,0.06)";
 
+tableHud.style.overflow = "hidden";
 document.body.appendChild(tableHud);
 
-// Handle clicks for collapsible sections (Suggested/History)
-tableHud.addEventListener("click", (evt) => {
-  const t = evt.target.closest("[data-toggle]");
-  if (!t) return;
+// --------------------
+// PAYOUT OVERLAY (floats over Table HUD)
+// --------------------
+const tableOverlay = document.createElement("div");
+tableOverlay.style.position = "absolute";
+tableOverlay.style.left = "0";
+tableOverlay.style.top = "0";
+tableOverlay.style.right = "0";
+tableOverlay.style.pointerEvents = "none";
+tableOverlay.style.zIndex = "50";
+tableOverlay.style.padding = "10px 12px";
+tableOverlay.style.boxSizing = "border-box";
+tableHud.appendChild(tableOverlay);
 
-  const key = t.dataset.toggle;
-  if (key === "suggested") showSuggested = !showSuggested;
-  if (key === "history") showHistory = !showHistory;
+let payoutTimer = null;
+let payoutLastSig = "";
+let payoutShowing = false;
 
-  // force refresh immediately
-  lastTableSig = "";
-  updateTableHud();
+function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
+  const bg =
+    tone === "win"
+      ? "rgba(34,197,94,0.16)"
+      : tone === "carry"
+      ? "rgba(255,255,255,0.10)"
+      : tone === "miss"
+      ? "rgba(239,68,68,0.14)"
+      : "rgba(255,255,255,0.10)";
+
+  const border =
+    tone === "win"
+      ? "rgba(34,197,94,0.35)"
+      : tone === "carry"
+      ? "rgba(255,255,255,0.22)"
+      : tone === "miss"
+      ? "rgba(239,68,68,0.30)"
+      : "rgba(255,255,255,0.22)";
+
+  tableOverlay.innerHTML = `
+    <div style="
+      border-radius:14px;
+      background:${bg};
+      border:1px solid ${border};
+      box-shadow: 0 10px 26px rgba(0,0,0,0.45);
+      padding:10px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      transform: translateY(${payoutShowing ? "0" : "-8px"});
+      opacity:${payoutShowing ? "1" : "0"};
+      transition: opacity 220ms ease, transform 220ms ease;
+    ">
+      <div style="min-width:0;">
+        <div style="font-size:12px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+          ${title}
+        </div>
+        <div style="margin-top:3px; font-size:18px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+          ${left}
+        </div>
+      </div>
+      <div style="font-size:14px; opacity:0.85; white-space:nowrap; text-align:right;">
+        ${right}
+      </div>
+    </div>
+  `;
+
+  payoutShowing = false;
+  requestAnimationFrame(() => {
+    payoutShowing = true;
+    const card = tableOverlay.firstElementChild;
+    if (card) {
+      card.style.opacity = "1";
+      card.style.transform = "translateY(0)";
+    }
+  });
+
+  if (payoutTimer) clearTimeout(payoutTimer);
+  payoutTimer = setTimeout(() => {
+    const card = tableOverlay.firstElementChild;
+    if (card) {
+      card.style.opacity = "0";
+      card.style.transform = "translateY(-8px)";
+    }
+    payoutShowing = false;
+    requestRender();
+  }, 2400);
+
   requestRender();
-});
+}
 
 // --------------------
-// Player Grid (UPPER RIGHT) - adaptive + scroll for 6 players
+// Player Grid (UPPER RIGHT, 2 columns)
 // --------------------
 const playerGrid = document.createElement("div");
 playerGrid.style.position = "fixed";
@@ -377,19 +396,17 @@ playerGrid.style.top = "12px";
 playerGrid.style.zIndex = "10";
 playerGrid.style.pointerEvents = "auto";
 playerGrid.style.display = "grid";
+playerGrid.style.gridTemplateColumns = "repeat(2, 1fr)";
 playerGrid.style.gridAutoRows = "auto";
 playerGrid.style.gap = "10px";
 
-playerGrid.style.width = "min(820px, calc(100vw - 760px - 36px))";
+playerGrid.style.width = "min(720px, calc(100vw - 760px - 36px))";
 playerGrid.style.maxHeight = "calc(100vh - 24px)";
-playerGrid.style.overflow = "auto";              // ✅ scroll instead of "nope"
-playerGrid.style.paddingRight = "6px";           // room for scrollbar
-playerGrid.style.scrollbarGutter = "stable";     // keeps layout from shifting
-
+playerGrid.style.overflow = "hidden";
 document.body.appendChild(playerGrid);
 
 // --------------------
-// Player HUDs
+// Player HUDs + outcome border memory
 // --------------------
 const playerHuds = [];
 let lastTableSig = "";
@@ -397,16 +414,24 @@ const lastPlayerSig = [];
 let spinning = false;
 let hudLast = 0;
 
-function setPlayerGridColumns(playerCount) {
-  // If you have room, 3 columns makes 6 players feel clean
-  // Otherwise, it falls back to 2 columns.
-  const wideEnoughFor3 = window.innerWidth >= 1600;
-  const cols =
-    playerCount >= 5
-      ? (wideEnoughFor3 ? 3 : 2)
-      : (playerCount <= 2 ? 1 : 2);
+// ✅ remembers the latest outcome per player so we can color borders
+const playerOutcome = []; // "WIN" | "MISS" | null
 
-  playerGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+function setPlayerBorderFromOutcome(el, outcome) {
+  const o = String(outcome || "").toUpperCase();
+  if (o === "WIN") {
+    el.style.border = "2px solid rgba(34,197,94,0.85)";
+    el.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.18)";
+    return;
+  }
+  if (o === "MISS") {
+    el.style.border = "2px solid rgba(239,68,68,0.85)";
+    el.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.14)";
+    return;
+  }
+  // neutral
+  el.style.border = "1px solid rgba(255,255,255,0.15)";
+  el.style.boxShadow = "none";
 }
 
 function createPlayerHudCard(i) {
@@ -418,9 +443,8 @@ function createPlayerHudCard(i) {
   el.style.pointerEvents = "auto";
   el.style.minWidth = "0";
 
-  // ✅ NO blue active border / glow (removed entirely)
-  el.style.boxShadow = "none";
-  el.style.border = "1px solid rgba(255,255,255,0.15)";
+  // start neutral
+  setPlayerBorderFromOutcome(el, null);
 
   playerGrid.appendChild(el);
 
@@ -437,14 +461,17 @@ function createPlayerHudCard(i) {
 
 function rebuildPlayerHudsIfNeeded(playerCount) {
   while (playerHuds.length < playerCount) {
+    playerOutcome[playerHuds.length] = null;
     playerHuds.push(createPlayerHudCard(playerHuds.length));
   }
   while (playerHuds.length > playerCount) {
     const el = playerHuds.pop();
+    playerOutcome.pop();
     el.remove();
   }
 
-  setPlayerGridColumns(playerCount);
+  const rows = Math.ceil(playerCount / 2);
+  playerGrid.style.gridTemplateRows = `repeat(${Math.max(rows, 1)}, auto)`;
 }
 
 // --------------------
@@ -452,6 +479,11 @@ function rebuildPlayerHudsIfNeeded(playerCount) {
 // --------------------
 function commitPickForPlayer(playerIndex, pickNum) {
   if (spinning) return;
+
+  // ✅ Reset this player's border as soon as they make the next pick
+  playerOutcome[playerIndex] = null;
+  const card = playerHuds[playerIndex];
+  if (card) setPlayerBorderFromOutcome(card, null);
 
   const s = game.getState();
 
@@ -482,10 +514,52 @@ function commitPickForPlayer(playerIndex, pickNum) {
   if (res.allCommitted) {
     quantumSpinSmooth(() => {
       const rolled = cube.getTopFaceValue();
-      recordWinNumber(rolled); // ✅ add to history right when a roll is finalized
+      recordWinNumber(rolled);
 
       const rr = game.resolve(rolled);
       if (!rr.ok) console.log("Resolve failed:", rr.reason);
+
+      // ✅ After resolve, color player borders based on outcomes
+      const s2 = game.getState();
+      (s2.lastOutcomes || []).forEach((o) => {
+        const idx = s2.players.findIndex((p) => p.name === o.name);
+        const out = String(o.outcome || "").toUpperCase();
+        if (idx >= 0) {
+          playerOutcome[idx] = out === "WIN" ? "WIN" : out === "MISS" ? "MISS" : null;
+          const el = playerHuds[idx];
+          if (el) setPlayerBorderFromOutcome(el, playerOutcome[idx]);
+        }
+      });
+
+      // ✅ Floating PAYOUT overlay (no layout shift)
+      const winners = (s2.lastOutcomes || []).filter(
+        (o) => String(o.outcome || "").toUpperCase() === "WIN"
+      );
+      const winnerNames = winners.map((w) => w.name);
+      const sig = `${s2.round}|${s2.lastResult}|${winnerNames.join(",")}|${s2.jackpot}`;
+
+      if (sig !== payoutLastSig) {
+        payoutLastSig = sig;
+
+        if (!winnerNames.length) {
+          showPayoutOverlay({
+            title: "PAYOUT",
+            left: `Rolled ${s2.lastResult ?? rolled}`,
+            right: "No winners • Pot carries",
+            tone: "carry"
+          });
+        } else {
+          const many = winnerNames.length > 2;
+          showPayoutOverlay({
+            title: "PAYOUT",
+            left: `Rolled ${s2.lastResult ?? rolled} • Winner${winnerNames.length > 1 ? "s" : ""}: ${
+              many ? `${winnerNames.length} players` : winnerNames.join(", ")
+            }`,
+            right: "Split pot",
+            tone: "win"
+          });
+        }
+      }
 
       updateAllHuds();
       requestRender();
@@ -496,22 +570,11 @@ function commitPickForPlayer(playerIndex, pickNum) {
 // --------------------
 // HUD Updates
 // --------------------
-function colorOutcome(outcome) {
-  const o = String(outcome || "").toUpperCase();
-  if (o === "WIN") return `<span style="color:#22c55e;">WIN</span>`;
-  if (o === "MISS") return `<span style="color:#ef4444;">MISS</span>`;
-  return outcome ?? "—";
-}
-
 function updateTableHud() {
   const s = game.getState();
 
-  // ✅ determine compact mode automatically based on player count
-  setCompactModeFromPlayers(s.players.length);
-
   const allCommitted = s.roundActive ? s.players.every((p) => p.committed) : false;
 
-  // ✅ No keyboard hint anymore (buttons only)
   const hint = spinning
     ? "Spinning…"
     : (!s.roundActive
@@ -519,12 +582,6 @@ function updateTableHud() {
         : (allCommitted
             ? "All committed • spinning…"
             : "Tap buttons to commit picks"));
-
-  const lastOutcomes = (s.lastOutcomes && s.lastOutcomes.length)
-    ? s.lastOutcomes
-        .map((o) => `${o.name}: ${o.pick} → ${colorOutcome(o.outcome)}`)
-        .join("<br/>")
-    : "—";
 
   const historyHtml = formatHistory();
 
@@ -534,16 +591,7 @@ function updateTableHud() {
   const confPct = Math.round(conf * 100);
   const confText = (winHistory.length < 3) ? "—" : confidenceLabel(conf);
 
-  // Compact sizing tweaks
-  const TOP_FACE_SIZE = isCompact ? 72 : 84;
-  const SUG_NUM_SIZE = isCompact ? 44 : 54;
-  const SECTION_TITLE_SIZE = isCompact ? 13 : 14;
-
   const sig = [
-    isCompact ? 1 : 0,
-    showSuggested ? 1 : 0,
-    showHistory ? 1 : 0,
-    s.players.length,
     cube.getTopFaceValue(),
     spinning ? 1 : 0,
     s.roundActive ? 1 : 0,
@@ -551,7 +599,6 @@ function updateTableHud() {
     s.minBet,
     s.jackpot,
     s.lastResult ?? "-",
-    lastOutcomes,
     winHistory.join(","),
     String(sug),
     String(confPct),
@@ -561,123 +608,13 @@ function updateTableHud() {
   if (sig === lastTableSig) return;
   lastTableSig = sig;
 
-  const suggestedSection = `
-    <div style="
-      margin-top:${isCompact ? 12 : 16}px;
-      padding-top:12px;
-      border-top:1px solid rgba(255,255,255,0.14);
-    ">
-      <div data-toggle="suggested" style="${makeSectionHeaderStyle()}">
-        <div style="display:flex; gap:10px; align-items:baseline;">
-          <div style="font-size:${SECTION_TITLE_SIZE}px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
-            ${caret(showSuggested)} SUGGESTED PICK
-          </div>
-          <div style="font-size:12px; opacity:0.55;">
-            ${isCompact ? "(tap to expand)" : ""}
-          </div>
-        </div>
-        <div style="font-size:12px; opacity:0.65;">
-          Confidence: <b>${confText}</b> (${confPct}%)
-        </div>
-      </div>
-
-      ${
-        showSuggested
-          ? `
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px;">
-              <div style="font-size:12px; opacity:0.65;">
-                ${streak.label}
-              </div>
-
-              <div style="
-                font-size:${SUG_NUM_SIZE}px;
-                line-height:1;
-                font-weight:1000;
-                letter-spacing:0.10em;
-                text-shadow: 0 0 18px rgba(255,255,255,0.12);
-              ">
-                ${sug}
-              </div>
-            </div>
-
-            <div style="
-              margin-top:10px;
-              height:10px;
-              border-radius:999px;
-              background: rgba(255,255,255,0.08);
-              border: 1px solid rgba(255,255,255,0.14);
-              overflow:hidden;
-            ">
-              <div style="
-                height:100%;
-                width:${confPct}%;
-                background: rgba(255,255,255,0.45);
-              "></div>
-            </div>
-
-            <div style="font-size:12px; opacity:0.65; margin-top:8px;">
-              ${suggestionTagline()}
-            </div>
-          `
-          : `
-            <div style="font-size:12px; opacity:0.65; margin-top:6px;">
-              ${suggestionTagline()}
-            </div>
-          `
-      }
-    </div>
-  `;
-
-  const historySection = `
-    <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
-      <div data-toggle="history" style="${makeSectionHeaderStyle()}">
-        <div style="font-size:${SECTION_TITLE_SIZE}px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
-          ${caret(showHistory)} WINNING NUMBER HISTORY
-        </div>
-        <div style="font-size:12px; opacity:0.55;">
-          ${isCompact ? "collapsed by default" : `last ${HISTORY_MAX}`}
-        </div>
-      </div>
-
-      ${
-        showHistory
-          ? `
-            <div style="
-              font-size:${isCompact ? 16 : 18}px;
-              margin-top:8px;
-              line-height:1.12;
-              letter-spacing:0.03em;
-              text-shadow: 0 0 16px rgba(255,255,255,0.10);
-              white-space:normal;
-              word-break:break-word;
-            ">
-              ${historyHtml}
-            </div>
-            <div style="font-size:12px; opacity:0.65; margin-top:8px;">
-              Latest on the left • last ${HISTORY_MAX}
-            </div>
-          `
-          : `
-            <div style="font-size:12px; opacity:0.65; margin-top:6px;">
-              Tap to expand
-            </div>
-          `
-      }
-    </div>
-  `;
-
   tableHud.innerHTML = `
-    <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px;">
-      <div style="font-size:14px; opacity:0.75; letter-spacing:0.14em; text-transform:uppercase;">
-        QUANTUMFLIP • MULTI (TABLE)
-      </div>
-      <div style="font-size:12px; opacity:0.60;">
-        Mode: <b>${UI_MODE === "auto" ? (isCompact ? "COMPACT" : "FULL") : UI_MODE.toUpperCase()}</b>
-      </div>
+    <div style="font-size:14px; opacity:0.75; letter-spacing:0.14em; text-transform:uppercase;">
+      QUANTUMFLIP • MULTI (TABLE)
     </div>
 
     <div style="
-      font-size:${TOP_FACE_SIZE}px;
+      font-size:84px;
       line-height:1;
       margin-top:10px;
       text-shadow: 0 0 18px rgba(255,255,255,0.18);
@@ -688,23 +625,80 @@ function updateTableHud() {
       (top face)
     </div>
 
-    <div style="margin-top:14px; font-size:${isCompact ? 20 : 22}px; line-height:1.45;">
+    <div style="margin-top:14px; font-size:22px; line-height:1.45;">
       Min Bet: <b>${s.minBet}</b><br/>
       Jackpot: <b>${s.jackpot}</b><br/>
       Round: <b>${s.round}</b><br/>
       Round Active: <b>${s.roundActive ? "YES" : "NO"}</b>
     </div>
 
-    ${suggestedSection}
-    ${historySection}
-
-    <div style="margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
-      <div style="font-size:${SECTION_TITLE_SIZE}px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
-        LAST RESULT
+    <div style="
+      margin-top:16px;
+      padding-top:12px;
+      border-top:1px solid rgba(255,255,255,0.14);
+    ">
+      <div style="display:flex; align-items:baseline; justify-content:space-between;">
+        <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+          SUGGESTED PICK
+        </div>
+        <div style="font-size:12px; opacity:0.65;">
+          Confidence: <b>${confText}</b> (${confPct}%)
+        </div>
       </div>
-      <div style="font-size:${isCompact ? 18 : 20}px; margin-top:8px;">
-        Rolled: <b>${s.lastResult ?? "—"}</b><br/>
-        ${lastOutcomes}
+
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px;">
+        <div style="font-size:12px; opacity:0.65;">
+          ${streak.label}
+        </div>
+
+        <div style="
+          font-size:54px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:0.10em;
+          text-shadow: 0 0 18px rgba(255,255,255,0.12);
+        ">
+          ${sug}
+        </div>
+      </div>
+
+      <div style="
+        margin-top:10px;
+        height:10px;
+        border-radius:999px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.14);
+        overflow:hidden;
+      ">
+        <div style="
+          height:100%;
+          width:${confPct}%;
+          background: rgba(255,255,255,0.45);
+        "></div>
+      </div>
+
+      <div style="font-size:12px; opacity:0.65; margin-top:8px;">
+        ${suggestionTagline()}
+      </div>
+    </div>
+
+    <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
+      <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
+        WINNING NUMBER HISTORY
+      </div>
+      <div style="
+        font-size:18px;
+        margin-top:10px;
+        line-height:1.15;
+        letter-spacing:0.04em;
+        text-shadow: 0 0 16px rgba(255,255,255,0.10);
+        white-space:normal;
+        word-break:break-word;
+      ">
+        ${historyHtml}
+      </div>
+      <div style="font-size:12px; opacity:0.65; margin-top:8px;">
+        Latest on the left • last ${HISTORY_MAX}
       </div>
     </div>
 
@@ -712,6 +706,9 @@ function updateTableHud() {
       ${hint}
     </div>
   `;
+
+  // ✅ re-attach overlay after innerHTML rewrite
+  tableHud.appendChild(tableOverlay);
 
   requestRender();
 }
@@ -724,7 +721,13 @@ function updatePlayerHud(i) {
   const pick = p.committed ? p.pick : "—";
 
   const sig = [
-    p.name, p.bankroll, pick, p.committed ? 1 : 0, s.roundActive ? 1 : 0, spinning ? 1 : 0
+    p.name,
+    p.bankroll,
+    pick,
+    p.committed ? 1 : 0,
+    s.roundActive ? 1 : 0,
+    spinning ? 1 : 0,
+    playerOutcome[i] || "-"
   ].join("|");
 
   if (lastPlayerSig[i] === sig) return;
@@ -732,9 +735,8 @@ function updatePlayerHud(i) {
 
   const el = playerHuds[i];
 
-  // ✅ Always neutral border (no active highlight)
-  el.style.boxShadow = "none";
-  el.style.border = "1px solid rgba(255,255,255,0.15)";
+  // ✅ border color reflects outcome (or neutral)
+  setPlayerBorderFromOutcome(el, playerOutcome[i]);
 
   const btnStyle = makeBtnStyle();
   const btnOpacity = p.committed ? "0.55" : "1";
@@ -755,11 +757,15 @@ function updatePlayerHud(i) {
     </div>
 
     <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; opacity:${btnOpacity};">
-      ${[1,2,3,4,5,6].map(n => `
+      ${[1, 2, 3, 4, 5, 6]
+        .map(
+          (n) => `
         <button data-pick="${n}" style="${btnStyle}">
           ${n}
         </button>
-      `).join("")}
+      `
+        )
+        .join("")}
     </div>
   `;
 
@@ -785,7 +791,7 @@ function updateHudsThrottled(now = performance.now()) {
 updateAllHuds();
 
 // --------------------
-// Input (BUTTONS ONLY) - keep only Escape reset
+// Input - keep only Escape reset
 // --------------------
 window.addEventListener("keydown", (e) => {
   if (e.repeat) return;
@@ -794,12 +800,16 @@ window.addEventListener("keydown", (e) => {
     spinning = false;
     lastTableSig = "";
     lastPlayerSig.length = 0;
-    winHistory.length = 0; // ✅ clear history on reset
-    suggestedPick = null; // ✅ clear suggestion on reset
+    winHistory.length = 0;
+    suggestedPick = null;
 
-    // reset UI state (feels consistent after reset)
-    showSuggested = true;
-    showHistory = true;
+    payoutLastSig = "";
+    if (payoutTimer) clearTimeout(payoutTimer);
+    payoutTimer = null;
+    tableOverlay.innerHTML = "";
+
+    // ✅ clear outcome borders
+    for (let i = 0; i < playerOutcome.length; i++) playerOutcome[i] = null;
 
     updateAllHuds();
     requestRender();
@@ -870,7 +880,7 @@ function quantumSpinSmooth(onDone) {
   function settlePhase() {
     const start = { x: cube.rotation.x, y: cube.rotation.y, z: cube.rotation.z };
 
-    const turns = WILD_MS < 1300 ? 1 : (Math.floor(Math.random() * 2) + 1);
+    const turns = WILD_MS < 1300 ? 1 : Math.floor(Math.random() * 2) + 1;
     const extraTurns = () => turns * Math.PI * 2 * sign();
 
     const end = {
@@ -940,10 +950,6 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(1);
-
-  // keep the player grid responsive to screen width
-  setPlayerGridColumns(game.getState().players.length);
-
   requestRender();
   updateAllHuds();
 });
