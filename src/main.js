@@ -3,6 +3,12 @@ import { createQuantumCube } from "./quantumCube.js";
 import { createMultiPlayerGame } from "./gameMulti.js";
 
 // --------------------
+// Hard stop page scrollbars
+// --------------------
+document.body.style.margin = "0";
+document.body.style.overflow = "hidden";
+
+// --------------------
 // Scene
 // --------------------
 const scene = new THREE.Scene();
@@ -18,7 +24,6 @@ const camera = new THREE.PerspectiveCamera(
   100
 );
 camera.position.set(3.2, 5.2, 3.2);
-camera.lookAt(0, 0, 0);
 
 // --------------------
 // Renderer (laptop-friendly)
@@ -28,10 +33,7 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: "low-power"
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-
-// Force sane pixel ratio on laptops (big heat + jank reducer)
 renderer.setPixelRatio(1);
-
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -60,7 +62,9 @@ scene.add(stageLight);
 // QuantumCube
 // --------------------
 const cube = createQuantumCube(2);
+cube.position.y = 0.25;
 scene.add(cube);
+camera.lookAt(0, cube.position.y, 0);
 
 // --------------------
 // Multiplayer Game
@@ -74,39 +78,11 @@ const game = createMultiPlayerGame({
 });
 
 // --------------------
-// HUD
-// --------------------
-const hud = document.createElement("div");
-hud.style.position = "fixed";
-hud.style.left = "12px";
-hud.style.top = "12px";
-hud.style.padding = "14px 18px";
-hud.style.borderRadius = "14px";
-hud.style.background = "rgba(0,0,0,0.55)";
-hud.style.border = "1px solid rgba(255,255,255,0.15)";
-hud.style.color = "#e6edf3";
-hud.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
-hud.style.fontWeight = "800";
-hud.style.userSelect = "none";
-hud.style.minWidth = "320px";
-document.body.appendChild(hud);
-
-// --------------------
-// State
-// --------------------
-let spinning = false;
-let hudLast = 0;
-let lastHudSig = "";
-
-// which player is currently “holding the controller”
-let activePickerIndex = 0;
-
-// --------------------
 // Render scheduling (capped FPS + render-on-demand)
 // --------------------
 let needsRender = true;
 let lastFrameTime = 0;
-const FPS = 45; // laptop-friendly; bump to 60 if you want
+const FPS = 45;
 const FRAME_MS = 1000 / FPS;
 
 function requestRender() {
@@ -114,15 +90,206 @@ function requestRender() {
 }
 
 // --------------------
-// HUD
+// HUD styling helpers
 // --------------------
-function updateHud() {
+function baseHudStyle(el) {
+  el.style.padding = "12px 14px";
+  el.style.borderRadius = "14px";
+  el.style.background = "rgba(0,0,0,0.55)";
+  el.style.border = "1px solid rgba(255,255,255,0.15)";
+  el.style.color = "#e6edf3";
+  el.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  el.style.fontWeight = "800";
+  el.style.userSelect = "none";
+  el.style.backdropFilter = "blur(6px)";
+  el.style.boxSizing = "border-box";
+}
+
+function makeBtnStyle() {
+  return `
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:32px;
+    height:28px;
+    border-radius:10px;
+    border:1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.06);
+    color:#e6edf3;
+    font-weight:900;
+    cursor:pointer;
+    user-select:none;
+    padding:0;
+    box-sizing:border-box;
+  `;
+}
+
+// --------------------
+// Table HUD (top-left) - large + casino readable
+// --------------------
+const tableHud = document.createElement("div");
+baseHudStyle(tableHud);
+tableHud.style.position = "fixed";
+tableHud.style.left = "12px";
+tableHud.style.top = "12px";
+tableHud.style.zIndex = "10";
+
+tableHud.style.minWidth = "680px";
+tableHud.style.maxWidth = "min(720px, calc(100vw - 24px))";
+tableHud.style.padding = "22px 26px";
+tableHud.style.borderRadius = "18px";
+
+tableHud.style.fontSize = "20px";
+tableHud.style.lineHeight = "1.35";
+tableHud.style.letterSpacing = "0.02em";
+tableHud.style.background = "rgba(0,0,0,0.74)";
+tableHud.style.border = "1px solid rgba(255,255,255,0.22)";
+tableHud.style.boxShadow =
+  "0 14px 50px rgba(0,0,0,0.55), 0 0 0 2px rgba(255,255,255,0.06)";
+
+document.body.appendChild(tableHud);
+
+// --------------------
+// Player Grid (UPPER RIGHT, 2x3)
+// --------------------
+const playerGrid = document.createElement("div");
+playerGrid.style.position = "fixed";
+playerGrid.style.right = "12px";
+playerGrid.style.top = "12px";
+playerGrid.style.zIndex = "10";
+playerGrid.style.pointerEvents = "auto";
+playerGrid.style.display = "grid";
+playerGrid.style.gridTemplateColumns = "repeat(2, 1fr)";
+playerGrid.style.gridAutoRows = "auto";
+playerGrid.style.gap = "10px";
+
+playerGrid.style.width = "min(720px, calc(100vw - 760px - 36px))";
+playerGrid.style.maxHeight = "calc(100vh - 24px)";
+playerGrid.style.overflow = "hidden";
+
+document.body.appendChild(playerGrid);
+
+// --------------------
+// Player HUDs
+// --------------------
+const playerHuds = [];
+let lastTableSig = "";
+const lastPlayerSig = [];
+let spinning = false;
+let hudLast = 0;
+
+function createPlayerHudCard(i) {
+  const el = document.createElement("div");
+  baseHudStyle(el);
+
+  el.style.padding = "10px 12px";
+  el.style.overflow = "hidden";
+  el.style.pointerEvents = "auto";
+  el.style.minWidth = "0";
+
+  // ✅ NO blue active border / glow (removed entirely)
+  el.style.boxShadow = "none";
+  el.style.border = "1px solid rgba(255,255,255,0.15)";
+
+  playerGrid.appendChild(el);
+
+  el.addEventListener("click", (evt) => {
+    const btn = evt.target.closest("button[data-pick]");
+    if (!btn) return;
+    const n = Number(btn.dataset.pick);
+    if (!Number.isInteger(n)) return;
+    commitPickForPlayer(i, n);
+  });
+
+  return el;
+}
+
+function rebuildPlayerHudsIfNeeded(playerCount) {
+  while (playerHuds.length < playerCount) {
+    playerHuds.push(createPlayerHudCard(playerHuds.length));
+  }
+  while (playerHuds.length > playerCount) {
+    const el = playerHuds.pop();
+    el.remove();
+  }
+
+  const rows = Math.ceil(playerCount / 2);
+  playerGrid.style.gridTemplateRows = `repeat(${Math.max(rows, 1)}, auto)`;
+}
+
+// --------------------
+// Commit pick for a player (BUTTONS ONLY)
+// --------------------
+function commitPickForPlayer(playerIndex, pickNum) {
+  if (spinning) return;
+
   const s = game.getState();
 
-  // clamp active index so it never goes out of range
-  activePickerIndex = Math.min(activePickerIndex, s.players.length - 1);
+  // First commit starts the round (antes everyone)
+  if (!s.roundActive) {
+    const start = game.startRound();
+    if (!start.ok) {
+      console.log(
+        "Can't start round:",
+        start.reason,
+        start.player ? `(${start.player})` : ""
+      );
+      updateAllHuds();
+      return;
+    }
+  }
 
-  // Signature to prevent pointless DOM rebuilds (huge smoothness win)
+  const res = game.pickNumber(playerIndex, pickNum);
+  if (!res.ok) {
+    console.log("Pick rejected:", res.reason);
+    updateAllHuds();
+    return;
+  }
+
+  updateAllHuds();
+
+  // Last committer triggers spin
+  if (res.allCommitted) {
+    quantumSpinSmooth(() => {
+      const rolled = cube.getTopFaceValue();
+      const rr = game.resolve(rolled);
+      if (!rr.ok) console.log("Resolve failed:", rr.reason);
+      updateAllHuds();
+      requestRender();
+    });
+  }
+}
+
+// --------------------
+// HUD Updates
+// --------------------
+function colorOutcome(outcome) {
+  const o = String(outcome || "").toUpperCase();
+  if (o === "WIN") return `<span style="color:#22c55e;">WIN</span>`;
+  if (o === "MISS") return `<span style="color:#ef4444;">MISS</span>`;
+  return outcome ?? "—";
+}
+
+function updateTableHud() {
+  const s = game.getState();
+
+  const allCommitted = s.roundActive ? s.players.every((p) => p.committed) : false;
+
+  // ✅ No keyboard hint anymore (buttons only)
+  const hint = spinning
+    ? "Spinning…"
+    : (!s.roundActive
+        ? "Tap a player's buttons to commit • Esc=Reset"
+        : (allCommitted
+            ? "All committed • spinning…"
+            : "Tap buttons to commit picks"));
+
+  const lastOutcomes = (s.lastOutcomes && s.lastOutcomes.length)
+    ? s.lastOutcomes
+        .map((o) => `${o.name}: ${o.pick} → ${colorOutcome(o.outcome)}`)
+        .join("<br/>")
+    : "—";
+
   const sig = [
     cube.getTopFaceValue(),
     spinning ? 1 : 0,
@@ -130,82 +297,48 @@ function updateHud() {
     s.round,
     s.minBet,
     s.jackpot,
-    ...s.players.flatMap((p) => [p.bankroll, p.pick ?? -1, p.committed ? 1 : 0]),
-    ...(s.lastOutcomes?.map((o) => `${o.name}:${o.pick}:${o.outcome}`) ?? [])
+    s.lastResult ?? "-",
+    lastOutcomes
   ].join("|");
 
-  if (sig === lastHudSig) return;
-  lastHudSig = sig;
+  if (sig === lastTableSig) return;
+  lastTableSig = sig;
 
-  const activeName = s.players?.[activePickerIndex]?.name ?? "—";
-
-  const allCommitted = s.roundActive
-    ? s.players.every((p) => p.committed)
-    : false;
-
-  const hint = spinning
-    ? "Spinning…"
-    : (!s.roundActive
-        ? "Press 1–6 to start round + commit • Q=P1 W=P2, E=P3 R=P4 T=P5 Y=P6 • Esc=Reset"
-        : (allCommitted
-            ? "All committed • spinning…"
-            : "Commit picks • Q/W/E/R/T/Y select • 1–6 commit"));
-
-  const playersHtml = s.players.map((p, i) => {
-    const isActive = i === activePickerIndex;
-    const pick = p.committed ? p.pick : "—";
-    const tag = isActive ? " (active)" : "";
-    return `
-      <div style="margin-top:6px;">
-        <b>${p.name}${tag}</b> • $${p.bankroll} • Pick: <b>${pick}</b>
-      </div>
-    `;
-  }).join("");
-
-  const lastOutcomes = (s.lastOutcomes && s.lastOutcomes.length)
-    ? s.lastOutcomes.map((o) =>
-        `${o.name}: ${o.pick} → ${o.outcome}`
-      ).join("<br/>")
-    : "—";
-
-  hud.innerHTML = `
-    <div style="font-size:12px; opacity:0.65; letter-spacing:0.08em;">
-      QUANTUMFLIP • MULTI
+  tableHud.innerHTML = `
+    <div style="font-size:14px; opacity:0.75; letter-spacing:0.14em; text-transform:uppercase;">
+      QUANTUMFLIP • MULTI (TABLE)
     </div>
 
-    <div style="font-size:44px; line-height:1; margin-top:10px;">
+    <div style="
+      font-size:84px;
+      line-height:1;
+      margin-top:10px;
+      text-shadow: 0 0 18px rgba(255,255,255,0.18);
+    ">
       ${cube.getTopFaceValue()}
     </div>
-    <div style="font-size:12px; opacity:0.6; margin-top:2px;">
+    <div style="font-size:14px; opacity:0.75; margin-top:2px;">
       (top face)
     </div>
 
-    <div style="margin-top:10px; font-size:14px; line-height:1.5;">
-      Active Picker: <b>${activeName}</b><br/>
+    <div style="margin-top:14px; font-size:22px; line-height:1.45;">
       Min Bet: <b>${s.minBet}</b><br/>
       Jackpot: <b>${s.jackpot}</b><br/>
       Round: <b>${s.round}</b><br/>
       Round Active: <b>${s.roundActive ? "YES" : "NO"}</b>
     </div>
 
-    <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
-      <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
-        PLAYERS
-      </div>
-      ${playersHtml}
-    </div>
-
-    <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.12);">
-      <div style="font-size:12px; opacity:0.6; letter-spacing:0.06em;">
+    <div style="margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.14);">
+      <div style="font-size:14px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
         LAST RESULT
       </div>
-      <div style="font-size:14px; margin-top:4px;">
+      <div style="font-size:20px; margin-top:8px;">
         Rolled: <b>${s.lastResult ?? "—"}</b><br/>
         ${lastOutcomes}
       </div>
     </div>
 
-    <div style="margin-top:10px; font-size:12px; opacity:0.6;">
+    <div style="margin-top:14px; font-size:14px; opacity:0.75;">
       ${hint}
     </div>
   `;
@@ -213,94 +346,85 @@ function updateHud() {
   requestRender();
 }
 
-function updateHudThrottled(now = performance.now()) {
-  if (!spinning) return updateHud();
-  if (now - hudLast > 75) { // ~13fps HUD during spin (lighter than before)
+function updatePlayerHud(i) {
+  const s = game.getState();
+  const p = s.players[i];
+  if (!p) return;
+
+  const pick = p.committed ? p.pick : "—";
+
+  const sig = [
+    p.name, p.bankroll, pick, p.committed ? 1 : 0, s.roundActive ? 1 : 0, spinning ? 1 : 0
+  ].join("|");
+
+  if (lastPlayerSig[i] === sig) return;
+  lastPlayerSig[i] = sig;
+
+  const el = playerHuds[i];
+
+  // ✅ Always neutral border (no active highlight)
+  el.style.boxShadow = "none";
+  el.style.border = "1px solid rgba(255,255,255,0.15)";
+
+  const btnStyle = makeBtnStyle();
+  const btnOpacity = p.committed ? "0.55" : "1";
+
+  el.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:baseline;">
+      <div style="font-size:13px; letter-spacing:0.06em;">
+        <b>${p.name}</b>
+      </div>
+      <div style="font-size:12px; opacity:0.65;">
+        ${p.committed ? "committed" : "waiting"}
+      </div>
+    </div>
+
+    <div style="margin-top:6px; font-size:14px; line-height:1.35;">
+      Bankroll: <b>$${p.bankroll}</b><br/>
+      Pick: <b>${pick}</b>
+    </div>
+
+    <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; opacity:${btnOpacity};">
+      ${[1,2,3,4,5,6].map(n => `
+        <button data-pick="${n}" style="${btnStyle}">
+          ${n}
+        </button>
+      `).join("")}
+    </div>
+  `;
+
+  requestRender();
+}
+
+function updateAllHuds() {
+  const s = game.getState();
+  rebuildPlayerHudsIfNeeded(s.players.length);
+
+  updateTableHud();
+  for (let i = 0; i < s.players.length; i++) updatePlayerHud(i);
+}
+
+function updateHudsThrottled(now = performance.now()) {
+  if (!spinning) return updateAllHuds();
+  if (now - hudLast > 90) {
     hudLast = now;
-    updateHud();
+    updateAllHuds();
   }
 }
 
-updateHud();
+updateAllHuds();
 
 // --------------------
-// Input
+// Input (BUTTONS ONLY) - keep only Escape reset
 // --------------------
 window.addEventListener("keydown", (e) => {
-  const key = e.key;
-  const k = key.toLowerCase();
-
-  // prevent scroll for gameplay keys
-  if (key === " " || ["1", "2", "3", "4", "5", "6"].includes(key)) {
-    e.preventDefault();
-  }
   if (e.repeat) return;
-
-  // reset
-  if (key === "Escape") {
+  if (e.key === "Escape") {
     game.reset();
     spinning = false;
-    activePickerIndex = 0;
-    lastHudSig = ""; // force HUD repaint
-    updateHud();
-    requestRender();
-    return;
-  }
-
-  // select active player
-  if (k === "q") { activePickerIndex = 0; updateHud(); return; }
-  if (k === "w") { activePickerIndex = 1; updateHud(); return; }
-  if (k === "e") { activePickerIndex = 2; updateHud(); return; }
-  if (k === "r") { activePickerIndex = 3; updateHud(); return; }
-  if (k === "t") { activePickerIndex = 4; updateHud(); return; }
-  if (k === "y") { activePickerIndex = 5; updateHud(); return; }
-
-  // no inputs during spin
-  if (spinning) return;
-
-  // commit pick
-  if (["1", "2", "3", "4", "5", "6"].includes(key)) {
-    const s = game.getState();
-
-    // first pick of a round auto-starts the round (antes everyone)
-    if (!s.roundActive) {
-      const start = game.startRound();
-      if (!start.ok) {
-        console.log("Can't start round:", start.reason, start.player ? `(${start.player})` : "");
-        updateHud();
-        return;
-      }
-    }
-
-    const pickNum = Number(key);
-    const res = game.pickNumber(activePickerIndex, pickNum);
-    if (!res.ok) {
-      console.log("Pick rejected:", res.reason);
-      updateHud();
-      return;
-    }
-
-    updateHud();
-    requestRender();
-
-    // ✅ if that was the last commit, spin immediately
-    if (res.allCommitted) {
-      quantumSpinSmooth(() => {
-        const rolled = cube.getTopFaceValue();
-        const rr = game.resolve(rolled);
-        if (!rr.ok) console.log("Resolve failed:", rr.reason);
-        updateHud();
-        requestRender();
-      });
-    }
-
-    return;
-  }
-
-  // Space does nothing in this mode (spin is automatic on last commit)
-  if (key === " ") {
-    console.log("Multiplayer: spin happens automatically when all players commit.");
-    updateHud();
+    lastTableSig = "";
+    lastPlayerSig.length = 0;
+    updateAllHuds();
     requestRender();
   }
 });
@@ -347,13 +471,9 @@ function quantumSpinSmooth(onDone) {
     cube.rotation.z += vz * dt;
 
     requestRender();
-    updateHudThrottled(now);
+    updateHudsThrottled(now);
 
-    if (now - t0 < WILD_MS) {
-      requestAnimationFrame(wildPhase);
-      return;
-    }
-
+    if (now - t0 < WILD_MS) return requestAnimationFrame(wildPhase);
     settlePhase();
   }
 
@@ -393,7 +513,7 @@ function quantumSpinSmooth(onDone) {
       cube.rotation.z = start.z + (end.z - start.z) * e;
 
       requestRender();
-      updateHudThrottled(now);
+      updateHudsThrottled(now);
 
       if (t < 1) return requestAnimationFrame(tick);
 
@@ -407,7 +527,7 @@ function quantumSpinSmooth(onDone) {
       cube.rotation.z = norm2pi(cube.rotation.z);
 
       spinning = false;
-      updateHud();
+      updateAllHuds();
       requestRender();
       if (typeof onDone === "function") onDone();
     }
@@ -442,9 +562,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-
-  // keep pixel ratio sane on resize
   renderer.setPixelRatio(1);
-
   requestRender();
+  updateAllHuds();
 });
