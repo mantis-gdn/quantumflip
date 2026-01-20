@@ -114,13 +114,19 @@ export function createMultiPlayerGame({
     if (winners.length > 0) {
       // ✅ split the ENTIRE pot among winners
       const share = Math.floor(pot / winners.length);
-      const remainder = pot - share * winners.length;
+      let remainder = pot - share * winners.length;
 
       for (const w of winners) {
         w.bankroll += share;
       }
 
-      // leftover carries forward (no money disappears)
+      // ✅ distribute remainder fairly (first N winners get +1)
+      for (let i = 0; i < winners.length && remainder > 0; i++) {
+        winners[i].bankroll += 1;
+        remainder--;
+      }
+
+      // leftover carries forward (usually 0 now)
       state.jackpot = remainder;
     } else {
       // ✅ no winners: pot rolls into jackpot
