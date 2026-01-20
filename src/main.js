@@ -710,7 +710,7 @@ function updateTableHud() {
   lastTableSig = sig;
 
   tableHud.innerHTML = `
-    <div style="font-size:14px; opacity:0.75; letter-spacing:0.14em; text-transform:uppercase;">
+    <div style="font-size:24px; opacity:0.75; letter-spacing:0.14em; text-transform:uppercase;">
       QUANTUMFLIP • MULTI (TABLE)
     </div>
 
