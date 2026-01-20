@@ -251,22 +251,25 @@ function baseHudStyle(el) {
   el.style.boxSizing = "border-box";
 }
 
+// ✅ PATCH: more casino-like buttons (pop + depth)
 function makeBtnStyle() {
   return `
     display:inline-flex;
     align-items:center;
     justify-content:center;
-    width:32px;
-    height:28px;
-    border-radius:10px;
-    border:1px solid rgba(255,255,255,0.14);
-    background: rgba(255,255,255,0.06);
-    color:#e6edf3;
-    font-weight:900;
+    width:34px;
+    height:30px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,0.16);
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.25));
+    color:#f3f7ff;
+    font-weight:950;
     cursor:pointer;
     user-select:none;
     padding:0;
     box-sizing:border-box;
+    box-shadow: 0 10px 22px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.05);
+    transition: transform 90ms ease, box-shadow 120ms ease, background 120ms ease;
   `;
 }
 
@@ -297,94 +300,174 @@ tableHud.style.overflow = "hidden";
 document.body.appendChild(tableHud);
 
 // --------------------
-// PAYOUT OVERLAY (floats over Table HUD)
+// PAYOUT OVERLAY (TOP CENTER, above cube)
 // --------------------
-const tableOverlay = document.createElement("div");
-tableOverlay.style.position = "absolute";
-tableOverlay.style.left = "0";
-tableOverlay.style.top = "0";
-tableOverlay.style.right = "0";
-tableOverlay.style.pointerEvents = "none";
-tableOverlay.style.zIndex = "50";
-tableOverlay.style.padding = "10px 12px";
-tableOverlay.style.boxSizing = "border-box";
-tableHud.appendChild(tableOverlay);
+const payoutOverlay = document.createElement("div");
+payoutOverlay.style.position = "fixed";
+payoutOverlay.style.left = "50%";
+payoutOverlay.style.top = "12px";
+payoutOverlay.style.transform = "translateX(-50%)";
+payoutOverlay.style.zIndex = "9999";
+payoutOverlay.style.pointerEvents = "none";
+payoutOverlay.style.width = "min(900px, calc(100vw - 24px))";
+payoutOverlay.style.boxSizing = "border-box";
+document.body.appendChild(payoutOverlay);
 
 let payoutTimer = null;
 let payoutLastSig = "";
 let payoutShowing = false;
 
+// --------------------
+// ✅ PATCH: HUD FX CSS (ONE-TIME INJECTION)
+// --------------------
+function injectHudFxCss() {
+  if (document.getElementById("qf-hud-fx")) return;
+
+  const style = document.createElement("style");
+  style.id = "qf-hud-fx";
+  style.textContent = `
+    @keyframes qfPulseWin {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(34,197,94,0.22), 0 0 24px rgba(34,197,94,0.45), 0 0 52px rgba(34,197,94,0.22); }
+      50%      { box-shadow: 0 0 0 2px rgba(34,197,94,0.35), 0 0 34px rgba(34,197,94,0.70), 0 0 70px rgba(34,197,94,0.30); }
+    }
+    @keyframes qfPulseMiss {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(239,68,68,0.18), 0 0 22px rgba(239,68,68,0.40), 0 0 50px rgba(239,68,68,0.18); }
+      50%      { box-shadow: 0 0 0 2px rgba(239,68,68,0.30), 0 0 30px rgba(239,68,68,0.62), 0 0 65px rgba(239,68,68,0.26); }
+    }
+    @keyframes qfSlideDown {
+      from { transform: translateX(-50%) translateY(-14px); opacity: 0; }
+      to   { transform: translateX(-50%) translateY(0);     opacity: 1; }
+    }
+    @keyframes qfSlideUp {
+      from { transform: translateX(-50%) translateY(0);     opacity: 1; }
+      to   { transform: translateX(-50%) translateY(-14px); opacity: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// ✅ call once
+injectHudFxCss();
+
+// ✅ PATCH: payout overlay that actually pops (NEON + STRONG COLOR)
 function showPayoutOverlay({ title, left, right, tone = "neutral" }) {
-  const bg =
-    tone === "win"
-      ? "rgba(34,197,94,0.16)"
-      : tone === "carry"
-      ? "rgba(255,255,255,0.10)"
-      : tone === "miss"
-      ? "rgba(239,68,68,0.14)"
-      : "rgba(255,255,255,0.10)";
+  const isWin = tone === "win";
+  const isMiss = tone === "miss";
+  const isCarry = tone === "carry";
 
-  const border =
-    tone === "win"
-      ? "rgba(34,197,94,0.35)"
-      : tone === "carry"
-      ? "rgba(255,255,255,0.22)"
-      : tone === "miss"
-      ? "rgba(239,68,68,0.30)"
-      : "rgba(255,255,255,0.22)";
+  const hue = isWin ? 140 : isMiss ? 0 : isCarry ? 210 : 55;
+  const edge = `hsla(${hue}, 95%, 62%, 0.92)`;
+  const glow = `hsla(${hue}, 95%, 62%, 0.45)`;
+  const glow2 = `hsla(${hue}, 95%, 62%, 0.22)`;
 
-  tableOverlay.innerHTML = `
+  payoutOverlay.innerHTML = `
     <div style="
-      border-radius:14px;
-      background:${bg};
-      border:1px solid ${border};
-      box-shadow: 0 10px 26px rgba(0,0,0,0.45);
-      padding:10px 12px;
+      position:relative;
+      border-radius:20px;
+      background: rgba(0,0,0,0.78);
+      border: 2px solid ${edge};
+      box-shadow:
+        0 18px 62px rgba(0,0,0,0.75),
+        0 0 34px ${glow},
+        0 0 80px ${glow2};
+      padding:12px 14px;
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:12px;
-      transform: translateY(${payoutShowing ? "0" : "-8px"});
-      opacity:${payoutShowing ? "1" : "0"};
-      transition: opacity 220ms ease, transform 220ms ease;
+      gap:14px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
     ">
-      <div style="min-width:0;">
-        <div style="font-size:12px; opacity:0.75; letter-spacing:0.12em; text-transform:uppercase;">
-          ${title}
-        </div>
-        <div style="margin-top:3px; font-size:18px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-          ${left}
-        </div>
+      <!-- TOP LINE -->
+      <div style="
+        position:absolute;
+        left:-10%;
+        right:-10%;
+        top:0;
+        height:3px;
+        background: linear-gradient(90deg, transparent, ${edge}, transparent);
+        opacity:0.95;
+        pointer-events:none;
+      "></div>
+
+      <!-- SHIMMER STRIPE (NOW UNDER TEXT) -->
+      <div style="
+        position:absolute;
+        inset:-50% -15%;
+        background: linear-gradient(90deg, transparent, hsla(${hue},95%,62%,0.14), transparent);
+        transform: rotate(-8deg);
+        pointer-events:none;
+        z-index:0;
+        mix-blend-mode: screen;
+        opacity:0.9;
+      "></div>
+
+      <!-- CONTENT WRAP -->
+      <div style="min-width:0; position:relative; z-index:1;">
+        <div style="
+          font-size:12px;
+          opacity:0.92;
+          letter-spacing:0.18em;
+          text-transform:uppercase;
+          font-weight:950;
+          color: rgba(255,255,255,0.88);
+          text-shadow: 0 0 14px ${glow};
+        ">${title}</div>
+
+        <div style="
+          margin-top:4px;
+          font-size:18px;
+          font-weight:1000;
+          line-height:1.15;
+          color: #f6fbff;
+          white-space:nowrap;
+          overflow:hidden;
+          text-overflow:ellipsis;
+          text-shadow:
+            0 0 18px ${glow},
+            0 0 34px ${glow2};
+        ">${left}</div>
       </div>
-      <div style="font-size:14px; opacity:0.85; white-space:nowrap; text-align:right;">
-        ${right}
-      </div>
+
+      <div style="
+        position:relative;
+        z-index:1;
+        font-size:14px;
+        font-weight:1000;
+        white-space:nowrap;
+        text-align:right;
+        padding-left:12px;
+        border-left:1px solid rgba(255,255,255,0.12);
+        color:#f6fbff;
+        text-shadow:
+          0 0 18px ${glow},
+          0 0 34px ${glow2};
+      ">${right}</div>
+
+      <!-- BOTTOM LINE -->
+      <div style="
+        position:absolute;
+        left:-10%;
+        right:-10%;
+        bottom:0;
+        height:3px;
+        background: linear-gradient(90deg, transparent, ${edge}, transparent);
+        opacity:0.95;
+        pointer-events:none;
+      "></div>
     </div>
   `;
 
-  payoutShowing = false;
-  requestAnimationFrame(() => {
-    payoutShowing = true;
-    const card = tableOverlay.firstElementChild;
-    if (card) {
-      card.style.opacity = "1";
-      card.style.transform = "translateY(0)";
-    }
-  });
-
   if (payoutTimer) clearTimeout(payoutTimer);
   payoutTimer = setTimeout(() => {
-    const card = tableOverlay.firstElementChild;
-    if (card) {
-      card.style.opacity = "0";
-      card.style.transform = "translateY(-8px)";
-    }
-    payoutShowing = false;
+    payoutOverlay.innerHTML = "";
     requestRender();
-  }, 2400);
+  }, 5000);
 
   requestRender();
 }
+
 
 // --------------------
 // Player Grid (UPPER RIGHT, 2 columns)
@@ -414,24 +497,48 @@ const lastPlayerSig = [];
 let spinning = false;
 let hudLast = 0;
 
-// ✅ remembers the latest outcome per player so we can color borders
 const playerOutcome = []; // "WIN" | "MISS" | null
 
+// ✅ PATCH: NEON borders + pulse animation
 function setPlayerBorderFromOutcome(el, outcome) {
   const o = String(outcome || "").toUpperCase();
+
+  // reset baseline
+  el.style.animation = "none";
+  el.style.borderRadius = "16px";
+  el.style.border = "1px solid rgba(255,255,255,0.14)";
+  el.style.background =
+    "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.62))";
+  el.style.boxShadow =
+    "0 14px 38px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.06)";
+
   if (o === "WIN") {
-    el.style.border = "2px solid rgba(34,197,94,0.85)";
-    el.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.18)";
+    el.style.border = "3px solid rgba(34,197,94,0.98)";
+    el.style.boxShadow =
+      "0 0 0 2px rgba(34,197,94,0.22), " +
+      "0 0 26px rgba(34,197,94,0.55), " +
+      "0 0 60px rgba(34,197,94,0.22), " +
+      "0 16px 42px rgba(0,0,0,0.58), " +
+      "inset 0 0 0 1px rgba(34,197,94,0.14)";
+    el.style.background =
+      "linear-gradient(180deg, rgba(34,197,94,0.14), rgba(0,0,0,0.68))";
+    el.style.animation = "qfPulseWin 900ms ease-in-out infinite";
     return;
   }
+
   if (o === "MISS") {
-    el.style.border = "2px solid rgba(239,68,68,0.85)";
-    el.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.14)";
+    el.style.border = "3px solid rgba(239,68,68,0.98)";
+    el.style.boxShadow =
+      "0 0 0 2px rgba(239,68,68,0.18), " +
+      "0 0 24px rgba(239,68,68,0.50), " +
+      "0 0 58px rgba(239,68,68,0.18), " +
+      "0 16px 42px rgba(0,0,0,0.58), " +
+      "inset 0 0 0 1px rgba(239,68,68,0.12)";
+    el.style.background =
+      "linear-gradient(180deg, rgba(239,68,68,0.14), rgba(0,0,0,0.68))";
+    el.style.animation = "qfPulseMiss 900ms ease-in-out infinite";
     return;
   }
-  // neutral
-  el.style.border = "1px solid rgba(255,255,255,0.15)";
-  el.style.boxShadow = "none";
 }
 
 function createPlayerHudCard(i) {
@@ -443,9 +550,7 @@ function createPlayerHudCard(i) {
   el.style.pointerEvents = "auto";
   el.style.minWidth = "0";
 
-  // start neutral
   setPlayerBorderFromOutcome(el, null);
-
   playerGrid.appendChild(el);
 
   el.addEventListener("click", (evt) => {
@@ -480,14 +585,12 @@ function rebuildPlayerHudsIfNeeded(playerCount) {
 function commitPickForPlayer(playerIndex, pickNum) {
   if (spinning) return;
 
-  // ✅ Reset this player's border as soon as they make the next pick
   playerOutcome[playerIndex] = null;
   const card = playerHuds[playerIndex];
   if (card) setPlayerBorderFromOutcome(card, null);
 
   const s = game.getState();
 
-  // First commit starts the round (antes everyone)
   if (!s.roundActive) {
     const start = game.startRound();
     if (!start.ok) {
@@ -510,7 +613,6 @@ function commitPickForPlayer(playerIndex, pickNum) {
 
   updateAllHuds();
 
-  // Last committer triggers spin
   if (res.allCommitted) {
     quantumSpinSmooth(() => {
       const rolled = cube.getTopFaceValue();
@@ -519,19 +621,18 @@ function commitPickForPlayer(playerIndex, pickNum) {
       const rr = game.resolve(rolled);
       if (!rr.ok) console.log("Resolve failed:", rr.reason);
 
-      // ✅ After resolve, color player borders based on outcomes
       const s2 = game.getState();
       (s2.lastOutcomes || []).forEach((o) => {
         const idx = s2.players.findIndex((p) => p.name === o.name);
         const out = String(o.outcome || "").toUpperCase();
         if (idx >= 0) {
-          playerOutcome[idx] = out === "WIN" ? "WIN" : out === "MISS" ? "MISS" : null;
+          playerOutcome[idx] =
+            out === "WIN" ? "WIN" : out === "MISS" ? "MISS" : null;
           const el = playerHuds[idx];
           if (el) setPlayerBorderFromOutcome(el, playerOutcome[idx]);
         }
       });
 
-      // ✅ Floating PAYOUT overlay (no layout shift)
       const winners = (s2.lastOutcomes || []).filter(
         (o) => String(o.outcome || "").toUpperCase() === "WIN"
       );
@@ -552,9 +653,9 @@ function commitPickForPlayer(playerIndex, pickNum) {
           const many = winnerNames.length > 2;
           showPayoutOverlay({
             title: "PAYOUT",
-            left: `Rolled ${s2.lastResult ?? rolled} • Winner${winnerNames.length > 1 ? "s" : ""}: ${
-              many ? `${winnerNames.length} players` : winnerNames.join(", ")
-            }`,
+            left: `Rolled ${s2.lastResult ?? rolled} • Winner${
+              winnerNames.length > 1 ? "s" : ""
+            }: ${many ? `${winnerNames.length} players` : winnerNames.join(", ")}`,
             right: "Split pot",
             tone: "win"
           });
@@ -707,9 +808,6 @@ function updateTableHud() {
     </div>
   `;
 
-  // ✅ re-attach overlay after innerHTML rewrite
-  tableHud.appendChild(tableOverlay);
-
   requestRender();
 }
 
@@ -734,8 +832,6 @@ function updatePlayerHud(i) {
   lastPlayerSig[i] = sig;
 
   const el = playerHuds[i];
-
-  // ✅ border color reflects outcome (or neutral)
   setPlayerBorderFromOutcome(el, playerOutcome[i]);
 
   const btnStyle = makeBtnStyle();
@@ -806,9 +902,8 @@ window.addEventListener("keydown", (e) => {
     payoutLastSig = "";
     if (payoutTimer) clearTimeout(payoutTimer);
     payoutTimer = null;
-    tableOverlay.innerHTML = "";
+    payoutOverlay.innerHTML = "";
 
-    // ✅ clear outcome borders
     for (let i = 0; i < playerOutcome.length; i++) playerOutcome[i] = null;
 
     updateAllHuds();
@@ -924,7 +1019,7 @@ function quantumSpinSmooth(onDone) {
 
   requestAnimationFrame(wildPhase);
 
-  function randFloat(min, max) { return min + Math.random() * (max - min); }
+  function randFloat(min, max) { return min + Math.random() * (max - min + 1); }
   function randInt(min, max) { return Math.floor(min + Math.random() * (max - min + 1)); }
   function clampInt(v, min, max) { return Math.max(min, Math.min(max, v)); }
 }
