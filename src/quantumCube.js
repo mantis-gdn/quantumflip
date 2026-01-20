@@ -5,6 +5,7 @@ import * as THREE from "three";
  * - 6 numbered faces (1–6) rendered as textures
  * - 90° step rotations
  * - Can report which face is on top
+ * - NEW: animated emissive "cube lights" (colorful + pulsing)
  */
 
 const FACE_DEFS = [
@@ -18,6 +19,15 @@ const FACE_DEFS = [
 
 const STEP = Math.PI / 2;
 
+// A consistent neon-ish palette (no hardcoding required later)
+const FX = {
+  baseEmissive: 0.22,     // idle glow baseline
+  pulseAmount: 0.28,      // how much it pulses
+  speed: 0.9,             // cycle speed
+  saturation: 0.95,
+  lightness: 0.55
+};
+
 export function createQuantumCube(size = 2) {
   const geometry = new THREE.BoxGeometry(size, size, size);
 
@@ -26,6 +36,7 @@ export function createQuantumCube(size = 2) {
 
   const mesh = new THREE.Mesh(geometry, materials);
   mesh.userData.faces = FACE_DEFS;
+  mesh.userData.materials = materials;
 
   // Rotation helpers
   mesh.rotateXStep = (dir = 1) => rotateAxis(mesh, "x", dir);
@@ -39,6 +50,35 @@ export function createQuantumCube(size = 2) {
 
   mesh.getTopFaceValue = () => getTopFace(mesh).value;
   mesh.getTopFace = () => getTopFace(mesh);
+
+  /**
+   * NEW: Animated “lights” baked into emissive.
+   * Call this once per frame:
+   *   cube.updateFX(performance.now() * 0.001, intensity)
+   *
+   * intensity examples:
+   *   0.6 idle, 1.0 committing, 1.6 spinning, 0.3 settled
+   */
+  mesh.updateFX = (t, intensity = 0.8) => {
+    const mats = mesh.userData.materials;
+    if (!mats) return;
+
+    // pulse 0..1
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2.0);
+    const emissiveStrength = FX.baseEmissive + FX.pulseAmount * pulse;
+    const strength = emissiveStrength * intensity;
+
+    // Cycle hue, then offset per face so cube looks “alive”
+    for (let i = 0; i < mats.length; i++) {
+      const m = mats[i];
+      if (!m || !m.emissive) continue;
+
+      const hue = (t * FX.speed * 0.12 + i * 0.14) % 1;
+      m.emissive.setHSL(hue, FX.saturation, FX.lightness);
+      m.emissiveIntensity = strength;
+      m.needsUpdate = false; // no shader rebuild needed
+    }
+  };
 
   return mesh;
 }
@@ -74,11 +114,17 @@ function makeNumberMaterial(value) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8; // helps clarity at angles
 
-  return new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshStandardMaterial({
     map: texture,
     roughness: 0.55,
-    metalness: 0.12
+    metalness: 0.12,
+
+    // NEW: emissive "internal lights"
+    emissive: new THREE.Color("#00ffff"),
+    emissiveIntensity: FX.baseEmissive
   });
+
+  return mat;
 }
 
 function rotateAxis(mesh, axis, dir) {

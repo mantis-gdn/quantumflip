@@ -1029,6 +1029,10 @@ function quantumSpinSmooth(onDone) {
 // --------------------
 function animate(now = 0) {
   if (needsRender && now - lastFrameTime >= FRAME_MS) {
+
+    // NEW: animated cube glow
+    cube.updateFX(now * 0.001, spinning ? 1.6 : 0.8);
+
     renderer.render(scene, camera);
     lastFrameTime = now;
     needsRender = false;
