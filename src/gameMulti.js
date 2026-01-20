@@ -1,6 +1,6 @@
 // gameMulti.js
 export function createMultiPlayerGame({
-  players = ["P1", "P2"],
+  players = ["P1", "P2", "P3", "P4", "P5", "P6"],
   startingBankroll = 200,
   startingMinBet = 10,
   minBetIncrease = 5,
@@ -83,7 +83,7 @@ export function createMultiPlayerGame({
   }
 
   // --------------------
-  // Resolve roll
+  // Resolve roll (POT-BASED + JACKPOT CARRY)
   // --------------------
   function resolve(rolled) {
     if (!state.roundActive) {
@@ -108,21 +108,23 @@ export function createMultiPlayerGame({
       outcome: p.pick === rolled ? "WIN" : "MISS"
     }));
 
+    // ✅ pot = everyone’s ante this round + any carried jackpot
+    const pot = bet * state.players.length + state.jackpot;
+
     if (winners.length > 0) {
-      // ✅ split existing jackpot evenly
-      const split = Math.floor(state.jackpot / winners.length);
-      const remainder = state.jackpot - split * winners.length;
+      // ✅ split the ENTIRE pot among winners
+      const share = Math.floor(pot / winners.length);
+      const remainder = pot - share * winners.length;
 
       for (const w of winners) {
-        // bet back + share of jackpot
-        w.bankroll += bet + split;
+        w.bankroll += share;
       }
 
-      // keep remainder
+      // leftover carries forward (no money disappears)
       state.jackpot = remainder;
     } else {
-      // no winners: pot grows by all antes
-      state.jackpot += bet * state.players.length;
+      // ✅ no winners: pot rolls into jackpot
+      state.jackpot = pot;
     }
 
     state.roundActive = false;
@@ -138,7 +140,8 @@ export function createMultiPlayerGame({
       winners: winners.map((w) => w.name),
       jackpot: state.jackpot,
       minBet: state.minBet,
-      round: state.round
+      round: state.round,
+      pot
     };
   }
 

@@ -21,11 +21,17 @@ camera.position.set(3.2, 5.2, 3.2);
 camera.lookAt(0, 0, 0);
 
 // --------------------
-// Renderer
+// Renderer (laptop-friendly)
 // --------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: "low-power"
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+// Force sane pixel ratio on laptops (big heat + jank reducer)
+renderer.setPixelRatio(1);
+
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -60,7 +66,7 @@ scene.add(cube);
 // Multiplayer Game
 // --------------------
 const game = createMultiPlayerGame({
-  players: ["P1", "P2"],
+  players: ["P1", "P2", "P3", "P4", "P5", "P6"],
   startingBankroll: 200,
   startingMinBet: 10,
   minBetIncrease: 5,
@@ -90,15 +96,46 @@ document.body.appendChild(hud);
 // --------------------
 let spinning = false;
 let hudLast = 0;
+let lastHudSig = "";
 
 // which player is currently “holding the controller”
-let activePickerIndex = 0; // 0=P1, 1=P2
+let activePickerIndex = 0;
+
+// --------------------
+// Render scheduling (capped FPS + render-on-demand)
+// --------------------
+let needsRender = true;
+let lastFrameTime = 0;
+const FPS = 45; // laptop-friendly; bump to 60 if you want
+const FRAME_MS = 1000 / FPS;
+
+function requestRender() {
+  needsRender = true;
+}
 
 // --------------------
 // HUD
 // --------------------
 function updateHud() {
   const s = game.getState();
+
+  // clamp active index so it never goes out of range
+  activePickerIndex = Math.min(activePickerIndex, s.players.length - 1);
+
+  // Signature to prevent pointless DOM rebuilds (huge smoothness win)
+  const sig = [
+    cube.getTopFaceValue(),
+    spinning ? 1 : 0,
+    s.roundActive ? 1 : 0,
+    s.round,
+    s.minBet,
+    s.jackpot,
+    ...s.players.flatMap((p) => [p.bankroll, p.pick ?? -1, p.committed ? 1 : 0]),
+    ...(s.lastOutcomes?.map((o) => `${o.name}:${o.pick}:${o.outcome}`) ?? [])
+  ].join("|");
+
+  if (sig === lastHudSig) return;
+  lastHudSig = sig;
 
   const activeName = s.players?.[activePickerIndex]?.name ?? "—";
 
@@ -109,10 +146,10 @@ function updateHud() {
   const hint = spinning
     ? "Spinning…"
     : (!s.roundActive
-        ? "Press 1–6 to start round + commit • Q=P1 W=P2"
+        ? "Press 1–6 to start round + commit • Q=P1 W=P2, E=P3 R=P4 T=P5 Y=P6 • Esc=Reset"
         : (allCommitted
             ? "All committed • spinning…"
-            : "Commit picks • Q=P1 W=P2 • 1–6"));
+            : "Commit picks • Q/W/E/R/T/Y select • 1–6 commit"));
 
   const playersHtml = s.players.map((p, i) => {
     const isActive = i === activePickerIndex;
@@ -172,11 +209,13 @@ function updateHud() {
       ${hint}
     </div>
   `;
+
+  requestRender();
 }
 
 function updateHudThrottled(now = performance.now()) {
   if (!spinning) return updateHud();
-  if (now - hudLast > 50) {
+  if (now - hudLast > 75) { // ~13fps HUD during spin (lighter than before)
     hudLast = now;
     updateHud();
   }
@@ -198,17 +237,23 @@ window.addEventListener("keydown", (e) => {
   if (e.repeat) return;
 
   // reset
-  if (k === "r") {
+  if (key === "Escape") {
     game.reset();
     spinning = false;
     activePickerIndex = 0;
+    lastHudSig = ""; // force HUD repaint
     updateHud();
+    requestRender();
     return;
   }
 
-  // select active player (Q/W for P1/P2)
+  // select active player
   if (k === "q") { activePickerIndex = 0; updateHud(); return; }
   if (k === "w") { activePickerIndex = 1; updateHud(); return; }
+  if (k === "e") { activePickerIndex = 2; updateHud(); return; }
+  if (k === "r") { activePickerIndex = 3; updateHud(); return; }
+  if (k === "t") { activePickerIndex = 4; updateHud(); return; }
+  if (k === "y") { activePickerIndex = 5; updateHud(); return; }
 
   // no inputs during spin
   if (spinning) return;
@@ -236,6 +281,7 @@ window.addEventListener("keydown", (e) => {
     }
 
     updateHud();
+    requestRender();
 
     // ✅ if that was the last commit, spin immediately
     if (res.allCommitted) {
@@ -244,6 +290,7 @@ window.addEventListener("keydown", (e) => {
         const rr = game.resolve(rolled);
         if (!rr.ok) console.log("Resolve failed:", rr.reason);
         updateHud();
+        requestRender();
       });
     }
 
@@ -254,6 +301,7 @@ window.addEventListener("keydown", (e) => {
   if (key === " ") {
     console.log("Multiplayer: spin happens automatically when all players commit.");
     updateHud();
+    requestRender();
   }
 });
 
@@ -263,6 +311,7 @@ window.addEventListener("keydown", (e) => {
 function quantumSpinSmooth(onDone) {
   if (spinning) return;
   spinning = true;
+  requestRender();
 
   const SNAP_EVERY = Math.PI / 2;
 
@@ -297,6 +346,7 @@ function quantumSpinSmooth(onDone) {
     cube.rotation.y += vy * dt;
     cube.rotation.z += vz * dt;
 
+    requestRender();
     updateHudThrottled(now);
 
     if (now - t0 < WILD_MS) {
@@ -342,6 +392,7 @@ function quantumSpinSmooth(onDone) {
       cube.rotation.y = start.y + (end.y - start.y) * e;
       cube.rotation.z = start.z + (end.z - start.z) * e;
 
+      requestRender();
       updateHudThrottled(now);
 
       if (t < 1) return requestAnimationFrame(tick);
@@ -357,6 +408,7 @@ function quantumSpinSmooth(onDone) {
 
       spinning = false;
       updateHud();
+      requestRender();
       if (typeof onDone === "function") onDone();
     }
 
@@ -371,10 +423,14 @@ function quantumSpinSmooth(onDone) {
 }
 
 // --------------------
-// Render Loop
+// Render Loop (capped + on-demand)
 // --------------------
-function animate() {
-  renderer.render(scene, camera);
+function animate(now = 0) {
+  if (needsRender && now - lastFrameTime >= FRAME_MS) {
+    renderer.render(scene, camera);
+    lastFrameTime = now;
+    needsRender = false;
+  }
   requestAnimationFrame(animate);
 }
 animate();
@@ -386,4 +442,9 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+
+  // keep pixel ratio sane on resize
+  renderer.setPixelRatio(1);
+
+  requestRender();
 });
